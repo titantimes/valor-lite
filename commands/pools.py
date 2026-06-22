@@ -60,7 +60,7 @@ class Pools(commands.Cog):
     TOKEN_URL = f"{BASE_URL}/api/tokens"
     LOOTPOOL_URL = f"{BASE_URL}/api/lootpool"
     ASPECTPOOL_URL = f"{BASE_URL}/api/aspects"
-    LOOTRUN_ICON_URL = "https://static.wikia.nocookie.net/wynncraft_gamepedia_en/images/f/f0/LootrunUpdateIcon.png/revision/latest"
+    LOOTRUN_ICON_URL = "https://wynncraft.wiki.gg/images/LootrunUpdateIcon.png?d4bc04"
     ASPECT_ICON_URL = "https://nori.fish/resources/aspect.gif"
 
 
