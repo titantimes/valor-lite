@@ -1,4 +1,4 @@
-import discord, io, math
+import discord, io, math, os
 from PIL import Image, ImageDraw, ImageFont
 
 from core.settings import SettingsManager
@@ -8,32 +8,67 @@ from util.mappings import UI_EMOJI_MAP
 from util.requests import fetch_player_busts
 
 
-FONT_PATH = "assets/fonts/MinecraftRegular.ttf"
+FONT_PATHS = [
+    "MinecraftRegular.ttf",
+    "assets/MinecraftRegular.ttf",
+    "assets/fonts/MinecraftRegular.ttf",
+]
+
+
+def _resolve_font_path() -> str:
+    base_dir = os.path.dirname(os.path.dirname(__file__))
+
+    for path in FONT_PATHS:
+        candidates = [path, os.path.join(base_dir, path)]
+        for candidate in candidates:
+            if os.path.exists(candidate):
+                return candidate
+    return FONT_PATHS[0]
+
+
+def format_board_table_text(
+    headers: list[str],
+    data: list[list[str]],
+    page: int,
+    title: str = "Leaderboard",
+    show_rank: bool = True,
+    rows_per_page: int = 10,
+    rank_values: list[int] = None,
+) -> str:
+    start = page * rows_per_page
+    end = start + rows_per_page
+    sliced = [list(row) for row in data[start:end]]
+
+    if show_rank:
+        for i in range(len(sliced)):
+            if rank_values and (i + start) < len(rank_values):
+                rank_label = f"{rank_values[i + start]}."
+            else:
+                rank_label = f"{i + start + 1}."
+            sliced[i] = [rank_label] + list(sliced[i])
+
+    column_widths = [max(len(str(item)) for item in col) for col in zip(headers, *(sliced or [headers]))]
+
+    def row_format(row: list[str]) -> str:
+        cells = []
+        for i, col in enumerate(row):
+            value = str(col)
+            if i < len(row) - 1:
+                cells.append(f"{value:<{column_widths[i]}}")
+            else:
+                cells.append(value)
+        return " ┃ ".join(cells).rstrip()
+
+    header_row = row_format(headers)
+    separator = "━╋━".join("━" * column_widths[i] for i in range(len(headers)))
+    data_rows = [row_format(row) for row in sliced]
+
+    total_pages = max(1, math.ceil(len(data) / rows_per_page))
+    lines = [title, "", header_row, separator, *data_rows, "", f"Page {page + 1}/{total_pages}"]
+    return "```isbl\n" + "\n".join(lines) + "\n```"
 
 
 class BoardView(discord.ui.View):
-    """
-    A custom Discord UI View to display a simple paginated leaderboard.
-
-    Supports two display modes:
-    - Fancy image-based leaderboard using `build_board`
-    - Plain text embed leaderboard
-
-    Pagination controls allow navigating between pages of leaderboard data.
-
-    Attributes:
-        user_id (int): Discord user ID to fetch personal settings.
-        data (list of tuples): Leaderboard data as (name, value).
-        title (str): Title of the leaderboard embed.
-        max_page (int): Maximum page number for pagination.
-        stat_counter (str): Label for the stat column.
-        is_guild_board (bool): Whether this is a guild leaderboard (affects image).
-        use_text_embed (bool): Whether to use text embed fallback.
-        headers (list): Column headers for the leaderboard.
-        page (int): Current page index.
-        is_fancy (bool): Whether to use the image mode based on user setting.
-    """
-
     def __init__(
         self,
         user_id,
@@ -43,37 +78,47 @@ class BoardView(discord.ui.View):
         stat_counter: str = "Value",
         is_guild_board: bool = False,
         use_text_embed: bool = True,
+        show_rank: bool = True,
         headers: list[str] = None,
+        text_data: list[list[str]] = None,
+        text_headers: list[str] = None,
+        image_labels: list[str] = None,
+        image_value_headers: list[str] = None,
+        rank_values: list[int] = None,
     ):
         super().__init__()
         self.user_id = user_id
         self.data = data
         self.max_page = max_page if max_page is not None else math.ceil(len(data) / 10)
         self.title = title
+        self.show_rank = show_rank
         if headers:
-            # Use custom headers prepended by "Rank"
-            self.headers = ["Rank"] + headers
+            self.headers = (["Rank"] + headers) if show_rank else headers
         else:
-            # Default headers: Rank, Name, stat counter label
-            self.headers = ["Rank", "Name", stat_counter]
+            self.headers = ["Name", stat_counter]
+            if show_rank:
+                self.headers.insert(0, "Rank")
 
         self.stat_counter = stat_counter
         self.is_guild_board = is_guild_board
         self.use_text_embed = use_text_embed
+        self.text_data = text_data if text_data is not None else data
+        self.image_labels = image_labels
+        self.image_value_headers = image_value_headers
+        self.rank_values = rank_values
+        if text_headers is not None:
+            self.text_headers = (["Rank"] + text_headers) if show_rank else text_headers
+        else:
+            self.text_headers = self.headers
 
-        self.page = 0  # Start on first page
+        self.page = 0 
 
-        # Fetch user setting to decide if image mode or text embed is used
         setting = SettingsManager("user", user_id).get("preferred_leaderboard_output_type")
         self.is_fancy = True if setting == "image" else False
 
 
     @discord.ui.button(emoji=UI_EMOJI_MAP["left_arrow"], row=1)
     async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """
-        Handler for the 'previous page' button.
-        Moves to the previous page if possible; else sends an ephemeral warning.
-        """
         self.page -= 1
         if self.page < 0:
             self.page = 0
@@ -84,10 +129,6 @@ class BoardView(discord.ui.View):
 
     @discord.ui.button(emoji=UI_EMOJI_MAP["right_arrow"], row=1)
     async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """
-        Handler for the 'next page' button.
-        Moves to the next page if possible; else sends an ephemeral warning.
-        """
         self.page += 1
         if self.page > self.max_page:
             self.page = self.max_page
@@ -96,55 +137,56 @@ class BoardView(discord.ui.View):
             await self.update(interaction)
 
 
-    async def update(self, interaction: discord.Interaction):
-        """
-        Updates the message with the current page of leaderboard data.
+    @discord.ui.button(emoji=UI_EMOJI_MAP.get("newspaper", "📰"), row=1)
+    async def toggle_table_view(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.is_fancy = not self.is_fancy
+        await self.update(interaction)
 
-        Chooses to send either a fancy image board or a text embed based on user settings.
-        """
+
+    async def update(self, interaction: discord.Interaction):
         await interaction.response.defer()
 
         if self.is_fancy:
-            # Build the image leaderboard for the current page and send it
-            board = await build_board(self.data, self.page, is_guild_board=self.is_guild_board)
-            await interaction.edit_original_response(embed=None, view=self, attachments=[board])
+            board = await build_board(
+                self.data,
+                self.page,
+                is_guild_board=self.is_guild_board,
+                show_rank=self.show_rank,
+                row_labels=self.image_labels,
+                value_headers=self.image_value_headers,
+                rank_values=self.rank_values,
+            )
+            await interaction.edit_original_response(content=None, embed=None, view=self, attachments=[board])
         else:
-            # Prepare slice of data for current page (10 entries per page)
-            start = self.page * 10
-            end = start + 10
-            sliced = self.data[start:end]
-
-            # Add ranks as string prefix to each row
-            for i in range(len(sliced)):
-                sliced[i] = [f"{i+start+1}.", sliced[i][0], sliced[i][1]]
-
             if self.use_text_embed:
-                # Send paginated text embed leaderboard
-                embed = TextTableEmbed(self.headers, sliced, title=self.title, color=0x333333)
-                await interaction.edit_original_response(embed=embed, view=self, attachments=[])
+                start = self.page * 10
+                end = start + 10
+                sliced = [list(row) for row in self.text_data[start:end]]
+
+                if self.show_rank:
+                    for i in range(len(sliced)):
+                        if self.rank_values and (i + start) < len(self.rank_values):
+                            rank_label = f"{self.rank_values[i + start]}."
+                        else:
+                            rank_label = f"{i+start+1}."
+                        sliced[i] = [rank_label] + list(sliced[i])
+
+                embed = TextTableEmbed(self.text_headers, sliced, title=self.title, color=0x333333)
+                await interaction.edit_original_response(content=None, embed=embed, view=self, attachments=[])
             else:
-                # Alternate fallback (rarely used)
-                await PaginatedTextTable.send(interaction, self.headers, self.data, "Warcount sum for guilds")
+                table = format_board_table_text(
+                    self.text_headers,
+                    self.text_data,
+                    self.page,
+                    title=self.title,
+                    show_rank=self.show_rank,
+                    rank_values=self.rank_values,
+                )
+                await interaction.edit_original_response(content=table, embed=None, view=self, attachments=[])
 
 
 
 class WarcountBoardView(discord.ui.View):
-    """
-    A custom Discord UI View for a detailed warcount leaderboard supporting multiple class columns.
-
-    Supports paginated image or text table display, based on user settings.
-
-    Attributes:
-        user_id (int): Discord user ID to fetch personal settings.
-        headers (list): Column headers, including rank, name, guild, class counts, total.
-        rows (list of tuples): Data rows containing player warcounts.
-        listed_classes (list of str): Classes to show (ARCHER, WARRIOR, etc.).
-        is_guild_board (bool): Whether this is a guild leaderboard (affects image).
-        page (int): Current page index.
-        is_fancy (bool): Whether to use image output mode.
-        max_pages (int): Maximum page count based on data length.
-    """
-
     def __init__(
         self,
         user_id,
@@ -164,39 +206,28 @@ class WarcountBoardView(discord.ui.View):
 
         self.is_guild_board = is_guild_board
 
-        # User preference for image or text output
         setting = SettingsManager("user", user_id).get("preferred_leaderboard_output_type")
         self.is_fancy = True if setting == "image" else False
 
-        # Compute max pages needed for pagination (10 rows per page)
         self.max_pages = math.ceil(len(rows) / 10)
 
 
     async def update_message(self, interaction: discord.Interaction):
-        """
-        Updates the leaderboard message with the current page content.
-
-        Sends either an image-based warcount board or a formatted text table.
-        """
         if self.is_fancy:
             await interaction.response.defer()
             content = await build_warcount_board(self.data, self.page, self.listed_classes)
             await interaction.edit_original_response(content="", view=self, attachments=[content])
         else:
-            # Slice rows for current page
             start, end = self.page * 10, (self.page + 1) * 10
             sliced = self.data[start:end]
 
-            # Calculate widths for each column based on headers
             widths = [len(h) for h in self.headers]
             fmt = ' ┃ '.join(f'%{w}s' for w in widths)
 
-            lines = [fmt % tuple(self.headers)]  # header line
-            # Create a separator line replacing '┃' with '╋' and others with '━'
+            lines = [fmt % tuple(self.headers)]
             separator = ''.join('╋' if c == '┃' else '━' for c in lines[0])
             lines.append(separator)
 
-            # Append each row formatted with left-justified columns
             for row in sliced:
                 lines.append(' ┃ '.join(str(cell).ljust(widths[i]) for i, cell in enumerate(row)))
             lines.append(separator)
@@ -207,11 +238,6 @@ class WarcountBoardView(discord.ui.View):
 
     @discord.ui.button(emoji=UI_EMOJI_MAP["left_arrow"])
     async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """
-        Handler for 'previous page' button.
-
-        Moves back one page if possible; otherwise defers without message.
-        """
         if self.page > 0:
             self.page -= 1
             await self.update_message(interaction)
@@ -221,11 +247,6 @@ class WarcountBoardView(discord.ui.View):
 
     @discord.ui.button(emoji=UI_EMOJI_MAP["right_arrow"])
     async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
-        """
-        Handler for 'next page' button.
-
-        Moves forward one page if possible; otherwise defers without message.
-        """
         if self.page < self.max_pages - 1:
             self.page += 1
             await self.update_message(interaction)
@@ -234,94 +255,138 @@ class WarcountBoardView(discord.ui.View):
 
 
 
-async def build_board(data: list[tuple[str, int]], page: int, is_guild_board: bool = False) -> discord.File:
-    """
-    Builds a graphical leaderboard image with player/guild icons, ranks, names, and stat values.
-
-    Args:
-        data (list of tuples): Leaderboard entries as (name, value).
-        page (int): Current page index for pagination.
-        is_guild_board (bool): If True, render guild icons instead of player busts.
-
-    Returns:
-        discord.File: A Discord file object containing the generated PNG image.
-    """
-    # Prepare data with ranks enumerated starting from 1
+async def build_board(
+    data: list[list],
+    page: int,
+    is_guild_board: bool = False,
+    show_rank: bool = True,
+    row_labels: list[str] = None,
+    value_headers: list[str] = None,
+    rank_values: list[int] = None,
+) -> discord.File:
     data_list = []
     for i in range(len(data)):
-        data_list.append([i + 1, data[i][0], data[i][1]])
+        if rank_values and i < len(rank_values):
+            rank = rank_values[i]
+        else:
+            rank = i + 1
+        data_list.append([rank] + list(data[i]))
 
-    # Margins / X-coordinates for drawing elements
+    value_columns = 1
+    if data_list:
+        value_columns = max(1, len(data_list[0]) - 2)
+
     rank_margin = 45
-    model_margin = 115
-    name_margin = 205
-    value_margin = 685
+    model_margin = 115 if show_rank else 45
+    name_margin = 205 if show_rank else 135
 
-    # Load Minecraft font at size 20
-    font = ImageFont.truetype("MinecraftRegular.ttf", 20)
+    if value_columns == 1:
+        value_positions = [685]
+        board_width = 730
+    else:
+        value_step = 110
+        min_left_value_margin = 470
+        board_width = max(730, (min_left_value_margin + (value_step * (value_columns - 1))) + 45)
+        right_anchor = board_width - 45
+        value_positions = [right_anchor - (value_step * (value_columns - 1 - idx)) for idx in range(value_columns)]
 
-    # Create base image with grey background
-    board = Image.new("RGBA", (730, 695), (110, 110, 110))
+    font = ImageFont.truetype(_resolve_font_path(), 20)
+    secondary_font = ImageFont.truetype(_resolve_font_path(), 16)
+    header_font = ImageFont.truetype(_resolve_font_path(), 24)
 
-    # Load alternating overlay images for row backgrounds
+    top_padding = 48 if value_headers else 0
+    board_height = 695 + top_padding
+    board = Image.new("RGBA", (board_width, board_height), (110, 110, 110))
+
     overlay = Image.open("assets/board_segment.png")
     overlay2 = Image.open("assets/board_segment_dark.png")
+    if overlay.width != board_width - 10:
+        overlay = overlay.resize((board_width - 10, overlay.height))
+        overlay2 = overlay2.resize((board_width - 10, overlay2.height))
     overlay_toggle = True
 
     draw = ImageDraw.Draw(board)
 
-    # Extract names from data to fetch icons
     names = []
     for i in data_list:
         names.append(i[1])
 
-    # Fetch guild tags or player busts depending on board type
     if is_guild_board:
         tags = (await guild_tags_from_names(names))[0]
     else:
         await fetch_player_busts(names)
 
-    # Render 10 entries per page
+    if value_headers:
+        header_color = (242, 242, 242)
+        header_bg = (120, 120, 120, 255)
+
+        draw.rounded_rectangle(
+            [(6, 6), (board_width - 6, 42)],
+            radius=6,
+            fill=header_bg,
+        )
+
+        draw.text(
+            (name_margin, 10),
+            "Name",
+            font=header_font,
+            fill=header_color,
+            stroke_width=1,
+            stroke_fill=(40, 40, 40),
+        )
+        for idx, header in enumerate(value_headers):
+            if idx >= len(value_positions):
+                break
+            draw.text(
+                (value_positions[idx], 10),
+                str(header),
+                font=header_font,
+                fill=header_color,
+                anchor="rt",
+                stroke_width=1,
+                stroke_fill=(40, 40, 40),
+            )
+
     for i in range(1, 11):
         try:
             stat = data_list[(i - 1) + (page * 10)]
         except IndexError:
-            # No more entries on this page
             continue
 
-        height = ((i - 1) * 69) + 5  # Y coordinate for this row
+        height = ((i - 1) * 69) + 5 + top_padding
 
-        # Paste alternating background segment
         board.paste(overlay if overlay_toggle else overlay2, (5, height), overlay)
         overlay_toggle = not overlay_toggle
 
-        # Load icon image based on guild or player
         if is_guild_board:
             tag = tags[names.index(stat[1])]
             try:
                 model_img = Image.open(f"assets/icons/guilds/{tag}.png", 'r').convert("RGBA")
             except FileNotFoundError:
-                # Use blank placeholder if guild icon missing
                 model_img = Image.new("RGBA", (64, 64))
         else:
             try:
-                # Player bust cached image
                 model_img = Image.open(f"/tmp/{stat[1]}_model.png", 'r').convert("RGBA")
             except Exception as e:
-                # Fallback unknown image with error logged
                 model_img = Image.open(f"assets/unknown_model.png", 'r').convert("RGBA")
                 print(f"Error loading image: {e}")
 
-        # Resize icon to 64x64 and paste
         model_img = model_img.resize((64, 64))
         board.paste(model_img, (model_margin, height), model_img.getchannel("A"))
 
-        # Draw rank, name, and stat value text
-        draw.text((rank_margin, height + 22), "#" + str(stat[0]), font=font)
+        if show_rank:
+            draw.text((rank_margin, height + 22), "#" + str(stat[0]), font=font)
         draw.text((name_margin, height + 22), str(stat[1]), font=font)
-        draw.text((value_margin, height + 22), str(stat[2]), font=font, anchor="rt")
+        if row_labels and (i - 1) + (page * 10) < len(row_labels):
+            row_label = str(row_labels[(i - 1) + (page * 10)])
+            draw.text((max(name_margin + 220, value_positions[0] - 95), height + 22), row_label, font=secondary_font)
 
-    # Save image to bytes buffer and create Discord file
+        values = stat[2:]
+        for idx, value in enumerate(values):
+            if idx >= len(value_positions):
+                break
+            draw.text((value_positions[idx], height + 22), str(value), font=font, anchor="rt")
+
     with io.BytesIO() as img_binary:
         board.save(img_binary, 'PNG')
         img_binary.seek(0)
@@ -336,43 +401,26 @@ async def build_warcount_board(
     listed_classes: list[str],
     is_guild_board: bool = False,
 ) -> discord.File:
-    """
-    Builds a detailed warcount leaderboard image showing warcounts per class and totals.
-
-    Args:
-        data (list of tuples): Warcount data rows.
-        page (int): Current page index.
-        listed_classes (list of str): Classes to show (e.g. ARCHER, WARRIOR).
-        is_guild_board (bool): Whether this is a guild leaderboard (affects icons).
-
-    Returns:
-        discord.File: Discord file containing the rendered PNG leaderboard image.
-    """
-    # Extract only the 10 rows for current page
     start = page * 10
     end = start + 10
     sliced = data[start:end]
 
-    # Load base template image for warcount leaderboard
     img = Image.open("assets/warcount_template.png")
     draw = ImageDraw.Draw(img)
 
-    # Font sizes for different elements
     name_fontsize = 20
     text_fontsize = 16
     total_fontsize = 18
 
-    # Load Minecraft fonts
-    name_font = ImageFont.truetype("assets/MinecraftRegular.ttf", name_fontsize)
-    text_font = ImageFont.truetype("assets/MinecraftRegular.ttf", text_fontsize)
-    total_font = ImageFont.truetype("assets/MinecraftRegular.ttf", total_fontsize)
+    font_path = _resolve_font_path()
+    name_font = ImageFont.truetype(font_path, name_fontsize)
+    text_font = ImageFont.truetype(font_path, text_fontsize)
+    total_font = ImageFont.truetype(font_path, total_fontsize)
 
-    # Collect names for icon fetching
     names = []
     for i in sliced:
         names.append(i[1])
 
-    # Fetch guild tags or player busts as applicable
     if is_guild_board:
         tags = (await guild_tags_from_names(names))[0]
     else:
@@ -380,15 +428,11 @@ async def build_warcount_board(
 
     i = 1
     for row in sliced:
-        # Calculate y-position for this row (with spacing)
         y = ((57 * (i / 2)) + (59 * (i / 2))) + 27
 
-        # Draw rank number (right-middle aligned)
         draw.text((62, y), f"{row[0]}.", "white", total_font, anchor="rm")
-        # Draw player/guild name (left-middle aligned)
         draw.text((153, y), row[1], "white", name_font, anchor="lm")
 
-        # Load and paste guild or player icon for this row
         if is_guild_board:
             tag = tags[names.index(row[1])]
             try:
@@ -403,16 +447,13 @@ async def build_warcount_board(
                 model_img = Image.open(f"assets/unknown_model.png", 'r').convert("RGBA")
                 print(f"Error loading image: {e}")
 
-        # Resize and paste the icon (54x54) slightly above y
         model_img = model_img.resize((54, 54))
         img.paste(model_img, (84, int(y) - 29), model_img.getchannel("A"))
 
-        # Draw total warcount (middle-middle aligned)
         draw.text((445, y), row[2], "white", total_font, anchor="mm")
 
         x = 0  # Offset for class warcount columns
 
-        # Draw warcounts for each listed class in fixed horizontal positions
         if "ARCHER" in listed_classes:
             draw.text((532, y), str(row[3 + x]), "white", text_font, anchor="mm")
             x += 1
@@ -429,12 +470,10 @@ async def build_warcount_board(
             draw.text((780, y), str(row[3 + x]), "white", text_font, anchor="mm")
             x += 1
 
-        # Draw total warcount sum at the right end, left-middle aligned
         draw.text((827, y), str(row[3 + x]), "white", total_font, anchor="lm")
 
         i += 1
 
-    # Save rendered image to bytes buffer and wrap in Discord file
     img_binary = io.BytesIO()
     img.save(img_binary, 'PNG')
     img_binary.seek(0)
