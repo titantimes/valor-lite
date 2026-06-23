@@ -67,6 +67,7 @@ class ValorBot(commands.Bot):
             "commands.coolness",
             "commands.ffa",
             "commands.graids",
+            "commands.graids2",
             "commands.guild",
             "commands.help",
             "commands.history",
