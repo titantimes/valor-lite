@@ -75,6 +75,7 @@ class ValorBot(commands.Bot):
             "commands.map",
             "commands.oceantrials",
             "commands.pings",
+            "commands.pingraid",
             "commands.pools",
             "commands.profile",
             "commands.settings",
