@@ -358,12 +358,14 @@ class OceanTrials(commands.Cog):
         )
 
 
-
 async def setup(bot: commands.Bot):
     cog = OceanTrials(bot)
     await bot.add_cog(cog)
+
     existing_global = bot.tree.get_command("oceantrials")
     if existing_global:
         bot.tree.remove_command("oceantrials")
-    guild = discord.Object(id=int(guild_id))
-    bot.tree.add_command(cog.oceantrials, guild=guild)
+
+    for guild_id in config.ANO_COMMANDS_GUILD_IDS:
+        guild = discord.Object(id=int(guild_id))
+        bot.tree.add_command(cog.oceantrials, guild=guild)
