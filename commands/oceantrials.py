@@ -188,8 +188,8 @@ class OceanTrials(commands.Cog):
     @app_commands.command(name="oceantrials", description="Ocean Trials points.")
     @app_commands.describe(
         mode="Which payout leaderboard to show: war, graid, or both",
-        season="Season number (e.g., 25, 26, 27)",
-        pot="Theoretical pot: 1 given use one number, both uses X,Y"
+        season="Season number (e.g., 31, 32) Reclaim data only recorded post 31",
+        pot="Theoretical pot, if using both do X,Y"
     )
     async def oceantrials(
         self,
