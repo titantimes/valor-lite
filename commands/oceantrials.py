@@ -67,7 +67,13 @@ class OceanTrials(commands.Cog):
 
     async def Fwarpoints(self, left: float, right: float) -> dict[str, float]:
         query = """
-            WITH normalised_records AS (
+            WITH eco_players AS (
+                SELECT DISTINCT A.uuid
+                FROM ano_reclaim_records A
+                WHERE A.time BETWEEN %s AND %s
+                  AND A.raid_type = 'eco'
+            ),
+            normalised_records AS (
                 SELECT
                     A.uuid,
                     CASE
@@ -76,6 +82,7 @@ class OceanTrials(commands.Cog):
                                 SELECT R.contribution
                                 FROM ano_reclaim_records R
                                 WHERE R.time BETWEEN A.time - 3600 AND A.time + 3600
+                                  AND R.uuid = A.uuid
                                   AND NOT (R.raid_type = 'eco' AND R.contribution = 0)
                                 ORDER BY R.contribution DESC, ABS(R.time - A.time) ASC
                                 LIMIT 1
@@ -90,6 +97,7 @@ class OceanTrials(commands.Cog):
                                 SELECT R.raid_type
                                 FROM ano_reclaim_records R
                                 WHERE R.time BETWEEN A.time - 3600 AND A.time + 3600
+                                  AND R.uuid = A.uuid
                                   AND NOT (R.raid_type = 'eco' AND R.contribution = 0)
                                 ORDER BY R.contribution DESC, ABS(R.time - A.time) ASC
                                 LIMIT 1
@@ -99,7 +107,9 @@ class OceanTrials(commands.Cog):
                         ELSE A.raid_type
                     END AS effective_raid_type
                 FROM ano_reclaim_records A
+                LEFT JOIN eco_players E ON E.uuid = A.uuid
                 WHERE A.time BETWEEN %s AND %s
+                  AND (E.uuid IS NULL OR A.raid_type = 'eco')
             )
             SELECT U.name AS name,
                    SUM(N.effective_contribution * CASE N.effective_raid_type
@@ -121,6 +131,8 @@ class OceanTrials(commands.Cog):
         rows = await Database.fetch(
             query,
             (
+                left,
+                right,
                 left,
                 right,
                 weights["big"],
