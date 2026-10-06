@@ -316,6 +316,7 @@ SELECT
     {", ".join(sum_columns)},
     ({total_expr}) AS total
 {base_join}
+WHERE A.guild IS NOT NULL
 GROUP BY A.guild
 ORDER BY total DESC
 LIMIT 50;
@@ -405,6 +406,7 @@ SELECT
 FROM delta_graids A
 WHERE A.time > %s
   AND A.time <= %s
+  AND A.guild IS NOT NULL
   {raidw}
 GROUP BY A.guild
 ORDER BY total DESC

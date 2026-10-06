@@ -67,7 +67,7 @@ class Warcount(commands.Cog):
             query = f"""
 SELECT guild, SUM(delta) AS wars
 FROM player_delta_record
-WHERE label = 'g_wars' {"AND time BETWEEN %s AND %s" if range else ""}
+WHERE label = 'g_wars' AND guild IS NOT NULL {"AND time BETWEEN %s AND %s" if range else ""}
 GROUP BY guild
 ORDER BY wars DESC
 LIMIT 100;

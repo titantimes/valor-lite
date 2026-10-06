@@ -166,7 +166,7 @@ async def guild_tags_from_names(names: List[str]) -> Tuple[MutableSet[str], List
     unidentified = []
 
     # Clean input (skip invalid names)
-    valid_names = [n for n in names if "-" not in n and ";" not in n]
+    valid_names = [n for n in names if n and "-" not in n and ";" not in n]
     if not valid_names:
         return [None] * len(names), names  # All invalid
 
@@ -203,7 +203,7 @@ async def guild_tags_from_names(names: List[str]) -> Tuple[MutableSet[str], List
     # Preserve order, keep casing
     final_tags = []
     for name in names:
-        lname = name.lower()
+        lname = name.lower() if name else None
         tag = tag_map.get(lname)
         final_tags.append(tag if tag else None)
         if lname not in tag_map and name not in unidentified:

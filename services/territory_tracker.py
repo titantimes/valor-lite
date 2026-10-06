@@ -27,14 +27,12 @@ def format_timedelta(td: timedelta) -> str:
             value, seconds = divmod(seconds, size)
             parts.append(f"{value}{name}")
             
-    # Return top two, or top one if only one exists
     return " ".join(parts[:2])
 
 
 
 def fetch_territory_data() -> dict:
     try:
-        # Try fetching from Athena API first
         response = requests.get(ATHENA_API_URL, timeout=10)
         response.raise_for_status()
         data = response.json()
@@ -45,7 +43,6 @@ def fetch_territory_data() -> dict:
     except requests.RequestException as e:
         logging.error(f"Error fetching territory data from Athena API: {e}")
 
-    # Fallback to Wynn API
     try:
         response = requests.get(WYNN_API_URL, timeout=10)
         response.raise_for_status()
@@ -69,22 +66,16 @@ def fetch_territory_data() -> dict:
 def create_terrchange_embed(old_territory, new_territory, for_ano: bool = False):
     embed = discord.Embed(
         title=f"Territory Captured: {new_territory['territory']}", 
-        color=0x007bff  # light, neutral blue color
+        color=0x007bff  
     )
     embed.add_field(name="Previous Owner", value=f"{old_territory['guild']} ({old_territory['guildPrefix']})", inline=True)
     embed.add_field(name="New Owner", value=f"{new_territory['guild']} ({new_territory['guildPrefix']})", inline=True)
-    
-    # add blank field line separator
     embed.add_field(name="\u200b", value="\u200b", inline=True)
-
     held_time = datetime.fromisoformat(new_territory["acquired"]) - datetime.fromisoformat(old_territory["acquired"])
     held_time_str = format_timedelta(held_time)
     embed.add_field(name="Held for", value=held_time_str, inline=True)
     embed.add_field(name="FFA Territory", value="Yes" if new_territory["territory"] in FFA_TERRITORIES else "No", inline=True)
-
-    # add blank field line separator for balancing spacing
     embed.add_field(name="\u200b", value="\u200b", inline=True)
-
     embed.set_footer(text=f"Acquired on: {datetime.fromisoformat(new_territory['acquired']).strftime('%d/%m/%Y %I:%M %p')}")
     return embed
 
@@ -94,12 +85,10 @@ class TerritoryTrackerService(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.territory_data = fetch_territory_data()  # Store the latest territory data
-        # Start the repeating weekly task
         self.terryitory_tracker_loop.start()
 
 
     def cog_unload(self):
-        # Cancel the task when the cog is unloaded (bot shutdown/reload)
         self.terryitory_tracker_loop.cancel()
 
 
@@ -149,10 +138,5 @@ class TerritoryTrackerService(commands.Cog):
     async def before_ticket_post_loop(self):
         await self.bot.wait_until_ready()
 
-
-
-
-
-# Cog setup function for bot
 async def setup(bot: commands.Bot):
     await bot.add_cog(TerritoryTrackerService(bot))

@@ -161,7 +161,7 @@ async def download_player_bust(session: aiohttp.ClientSession, name: str, filena
                 else:
                     logging.warning(f"Failed to fetch {name} ({uuid}): HTTP {response.status}")
     except Exception as e:
-        logging.error(f"Error fetching {name} ({uuid}): {e}")
+        logging.error(f"Error fetching {name} ({uuid}): {type(e).__name__}: {e}")
 
     return None
 
