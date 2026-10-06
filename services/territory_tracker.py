@@ -31,36 +31,40 @@ def format_timedelta(td: timedelta) -> str:
 
 
 
-def fetch_territory_data() -> dict:
-    try:
-        response = requests.get(ATHENA_API_URL, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        if "territories" in data:
-            return data["territories"]
+def normalize_territories(data: dict) -> dict:
+    if isinstance(data.get("territories"), dict):
+        data = data["territories"]
+
+    output = {}
+    for territory, info in data.items():
+        if not isinstance(info, dict) or "acquired" not in info:
+            continue
+        guild = info.get("guild")
+        if isinstance(guild, dict):
+            name, prefix = guild.get("name"), guild.get("prefix")
         else:
-            logging.warning("Territory Tracker: Athena API error")
-    except requests.RequestException as e:
-        logging.error(f"Error fetching territory data from Athena API: {e}")
+            name, prefix = guild, info.get("guildPrefix")
+        output[territory] = {
+            "territory": territory,
+            "guild": name or "None",
+            "guildPrefix": prefix or "None",
+            "acquired": info["acquired"],
+        }
+    return output
 
-    try:
-        response = requests.get(WYNN_API_URL, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        output = {}
-        for territory, info in data.items():
-            terr_info = {}
-            terr_info["territory"] = territory
-            terr_info["guild"] = info["guild"]["name"]
-            terr_info["guildPrefix"] = info["guild"]["prefix"]
-            terr_info["acquired"] = info["acquired"]
 
-            output[territory] = terr_info
-        
-        return output
-    except requests.RequestException as e:
-        logging.error(f"Error fetching territory data from Wynn API: {e}")
-        return {}
+def fetch_territory_data() -> dict:
+    for source, url in (("Athena", ATHENA_API_URL), ("Wynn", WYNN_API_URL)):
+        try:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            data = normalize_territories(response.json())
+            if data:
+                return data
+            logging.warning(f"Territory Tracker: {source} API returned no territories")
+        except (requests.RequestException, ValueError) as e:
+            logging.error(f"Error fetching territory data from {source} API: {e}")
+    return {}
 
 
 def create_terrchange_embed(old_territory, new_territory, for_ano: bool = False):
