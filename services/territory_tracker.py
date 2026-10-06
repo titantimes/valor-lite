@@ -1,4 +1,4 @@
-import logging, discord, requests
+import asyncio, logging, discord, requests
 
 from datetime import datetime, timedelta
 from discord.ext import commands, tasks
@@ -105,30 +105,49 @@ class TerritoryTrackerService(commands.Cog):
 
     @tasks.loop(minutes=1)  # Repeat every minute to check for updates
     async def terryitory_tracker_loop(self):
-        updated_data = fetch_territory_data()  # Update territory data every minute
-        # find all territories that have changed guild ownership
+        try:
+            await self._track_once()
+        except Exception:
+            logging.exception("Territory Tracker: iteration failed")
+
+
+    async def _track_once(self):
+        updated_data = await asyncio.to_thread(fetch_territory_data)
+        if not updated_data:
+            logging.warning("Territory Tracker: no data fetched, keeping previous snapshot")
+            return
+
+        if not self.territory_data:
+            self.territory_data = updated_data
+            return
+
         changed_territories = []
         for territory, info in updated_data.items():
-            if self.territory_data[territory]["guild"] != info["guild"]:
+            old = self.territory_data.get(territory)
+            if old is not None and old.get("guild") != info.get("guild"):
                 changed_territories.append(info)
 
         if changed_territories:
             channel = self.bot.get_channel(Config.TERRITORY_TRACKER_CHANNEL_ID)
             ano_channel = self.bot.get_channel(Config.ANO_TERRITORY_TRACKER_CHANNEL_ID)
             for territory in changed_territories:
-                for_ano = territory["guildPrefix"] == "ANO" or self.territory_data[territory["territory"]]["guildPrefix"] == "ANO"
-                embed = create_terrchange_embed(self.territory_data[territory["territory"]], territory, for_ano)
-                if for_ano:
-                    await ano_channel.send(embed=embed)
-                
-                await channel.send(embed=embed)
-            
+                old = self.territory_data[territory["territory"]]
+                try:
+                    for_ano = territory.get("guildPrefix") == "ANO" or old.get("guildPrefix") == "ANO"
+                    embed = create_terrchange_embed(old, territory, for_ano)
+                    if for_ano and ano_channel:
+                        await ano_channel.send(embed=embed)
+                    if channel:
+                        await channel.send(embed=embed)
+                except Exception:
+                    logging.exception(f"Territory Tracker: failed to post change for {territory.get('territory')}")
+
         self.territory_data = updated_data  # Update the stored data for the next loop iteration
 
 
     @terryitory_tracker_loop.before_loop
     async def before_ticket_post_loop(self):
-        pass
+        await self.bot.wait_until_ready()
 
 
 
