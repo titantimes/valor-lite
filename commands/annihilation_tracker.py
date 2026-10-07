@@ -1,6 +1,6 @@
 import discord, time, json, os, re, logging
 from discord import app_commands, Interaction, ButtonStyle, Message
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord.ui import View, Button
 
 from core.config import config
@@ -8,29 +8,124 @@ from util.embeds import ErrorEmbed
 from util.roles import is_ANO_high_rank
 
 
-# File used to store the last reported Annihilation timestamp
+# Previous anni reported storage
 ANNI_FILE = "storages/annihilation_tracker.json"
-# Embed color for Annihilation-related messages
+# Nice red embed
 ANNI_EMBED_COLOR = 0x7A1507
 
-
 class AnnihilationTracker(commands.Cog):
-    """
-    Cog containing commands for tracking and reporting Annihilation events.
-    """
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
 
-    def load_annihilation(self):
-        """
-        Load the Annihilation tracker file from disk.
+    async def cog_load(self):
+        self.reminderLoo.start()
+    def cog_unload(self):
+        self.reminderLoo.cancel()
 
-        Returns:
-            dict: Dictionary containing the last saved timestamp,
-                  or an empty dict if file is missing/invalid.
-        """
+    @tasks.loop(seconds=30)
+    async def reminderLoo(self):
+        try:
+            await self.checkRemind()
+        except Exception:
+            logging.exception("Annihilation reminder check failed")
+
+    @reminderLoo.before_loop
+    async def reminderLoo_b(self):
+        await self.bot.wait_until_ready()
+
+
+    async def checkRemind(self):
+        data = self.load_annihilation()
+        timestamp = data.get("timestamp", 0)
+        if not 0 < timestamp - time.time() <= 3600:
+            return
+
+        for guild_id, reminder in data.get("reminders", {}).items():
+            if reminder.get("notified_timestamp") == timestamp:
+                continue
+            try:
+                guild = self.bot.get_guild(int(guild_id))
+                if guild is None:
+                    continue
+                channel = guild.get_channel(reminder["channel_id"])
+                role = guild.get_role(reminder["role_id"])
+                if channel is None or role is None or role.is_default():
+                    continue
+                permissions = channel.permissions_for(guild.me)
+                if not (permissions.view_channel and permissions.send_messages):
+                    continue
+                if not role.mentionable and not permissions.mention_everyone:
+                    continue
+                await channel.send(
+                    f"{role.mention} Annihilation starts <t:{timestamp}:R> (<t:{timestamp}:f>)!",
+                    allowed_mentions=discord.AllowedMentions(
+                        everyone=False, users=False, roles=[role], replied_user=False
+                    ),
+                )
+                latest = self.load_annihilation()
+                current = latest.get("reminders", {}).get(guild_id)
+                if current == reminder:
+                    current["notified_timestamp"] = timestamp
+                    self.save_tracker_data(latest)
+            except Exception:
+                logging.exception("Annihilation reminder failed for guild %s", guild_id)
+
+
+    @app_commands.command(name="annihilation_reminder", description="Set the channel and role for Annihilation reminder.")
+    @app_commands.guild_only()
+    @app_commands.describe(
+        channel="Channel where the reminder will be",
+        role="Set the role to be pinged",
+        enabled="Set to false to remove reminders",
+    )
+    async def annihilation_reminder(
+        self, interaction: discord.Interaction,
+        channel: discord.TextChannel = None, role: discord.Role = None, enabled: bool = True,
+    ):
+        if not is_ANO_high_rank(interaction.user.roles):
+            return await interaction.response.send_message(
+                embed=ErrorEmbed("You do not have permission to configure Annihilation reminders."),
+                ephemeral=True,
+            )
+        data = self.load_annihilation()
+        reminders = data.setdefault("reminders", {})
+        guild_id = str(interaction.guild_id)
+        if not enabled:
+            reminders.pop(guild_id, None)
+            self.save_tracker_data(data)
+            return await interaction.response.send_message("Annihilation reminders disabled in this server.", ephemeral=True)
+        if channel is None and role is None:
+            reminder = reminders.get(guild_id)
+            message = (
+                f"Annihilation reminders: <#{reminder['channel_id']}> with <@&{reminder['role_id']}>."
+                if reminder else "No Annihilation reminder is configured in this server. Select a channel and role to enable it."
+            )
+            return await interaction.response.send_message(message, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        if channel is None or role is None:
+            return await interaction.response.send_message("Select both a channel and a role.", ephemeral=True)
+        if channel.guild.id != interaction.guild_id or role.guild.id != interaction.guild_id or role.is_default():
+            return await interaction.response.send_message("Select a channel and a role", ephemeral=True)
+        permissions = channel.permissions_for(interaction.guild.me)
+        if not (permissions.view_channel and permissions.send_messages):
+            return await interaction.response.send_message("needs View Channel and Send Messages permissions.", ephemeral=True)
+        if not role.mentionable and not permissions.mention_everyone:
+            return await interaction.response.send_message("Role must be mentionable or grant Mention Everyone permission in that channel.", ephemeral=True)
+        previous = reminders.get(guild_id, {})
+        reminders[guild_id] = {
+            "channel_id": channel.id,
+            "role_id": role.id,
+            "notified_timestamp": previous.get("notified_timestamp", 0),
+        }
+        self.save_tracker_data(data)
+        await interaction.response.send_message(
+            f"Annihilation reminders in {channel.mention}, pinging {role.mention}.",
+            ephemeral=True, allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+
+    def load_annihilation(self):
         if not os.path.exists(ANNI_FILE):
             return {}
         try:
@@ -40,30 +135,22 @@ class AnnihilationTracker(commands.Cog):
             # Something wrong with the file — return empty data
             return {}
 
-
     def save_annihilation(self, timestamp: int):
-        """
-        Save a new Annihilation timestamp to disk.
+        data = self.load_annihilation()
+        data["timestamp"] = timestamp
+        self.save_tracker_data(data)
 
-        Args:
-            timestamp (int): Unix timestamp for the next Annihilation event.
-        """
+    def save_tracker_data(self, data: dict):
+        os.makedirs(os.path.dirname(ANNI_FILE), exist_ok=True)
         with open(ANNI_FILE, "w") as f:
-            json.dump({"timestamp": timestamp}, f)
-
+            json.dump(data, f)
 
     @app_commands.command(name="annihilation", description="Check the next reported Annihilation World Event time.")
     async def annihilation(self, interaction: discord.Interaction):
-        """
-        Command to display the next scheduled Annihilation event time.
-
-        If no valid timestamp is stored, shows that no Annihilation is reported, and the most recent Annihilation time.
-        """
         data = self.load_annihilation()
         now = int(time.time())
         timestamp = data.get("timestamp", 0)
 
-        # If there is no record or the saved time is already in the past
         if not data or data.get("timestamp", 0) < now:
             return await interaction.response.send_message(
                 embed=discord.Embed(
@@ -76,7 +163,6 @@ class AnnihilationTracker(commands.Cog):
                 ).set_footer(text=f"Did Annie wake up? Ask an ANO high rank to report it!")
             )
 
-        # Otherwise, show the next scheduled Annihilation
         return await interaction.response.send_message(
             embed=discord.Embed(
                 title="Annihilation Tracker",
@@ -94,26 +180,14 @@ class AnnihilationTracker(commands.Cog):
         time_until="Time until next Annihilation (e.g. '2h30m', '1h 45m') or 'none'"
     )
     async def report_annihilation(self, interaction: discord.Interaction, time_until: str):
-        """
-        Command to report or update the Annihilation time.
-
-        Workflow:
-        1. Permission check — only ANO high rank (or TESTING mode) can report.
-        2. Handle 'none' input to clear stored data.
-        3. Parse time formats like '2h30m', '1h', '45m'.
-        4. If an existing future timestamp exists, ask for confirmation.
-        5. Save the new timestamp and confirm to the user.
-        """
         await interaction.response.defer()
 
-        # Permission check
         if not is_ANO_high_rank(interaction.user.roles):
             return await interaction.followup.send(
                 embed=ErrorEmbed("You do not have permission to report an Annihilation time."),
                 ephemeral=True
             )
 
-        # Special case: remove the recorded time
         if time_until.lower() == "none":
             self.save_annihilation(0)
             return await interaction.followup.send(
@@ -124,7 +198,6 @@ class AnnihilationTracker(commands.Cog):
                 )
             )
 
-        # Parse provided time string into hours and minutes
         match = re.match(
             r"(?:(\d+)h)?\s*(?:(\d+)m)?",
             time_until.replace(" ", ""),
@@ -139,18 +212,15 @@ class AnnihilationTracker(commands.Cog):
         hours = int(match.group(1)) if match.group(1) else 0
         minutes = int(match.group(2)) if match.group(2) else 0
 
-        # Reject zero-length durations
         if hours == 0 and minutes == 0:
             return await interaction.followup.send(
                 embed=ErrorEmbed("Duration must be greater than zero."),
                 ephemeral=True
             )
 
-        # Compute the new event timestamp
         new_ts = int(time.time()) + (hours * 3600) + (minutes * 60)
         existing = self.load_annihilation()
 
-        # If an Annihilation is already scheduled in the future, require confirmation
         if existing and existing["timestamp"] > int(time.time()):
             old_ts = existing["timestamp"]
             embed = discord.Embed(
@@ -167,7 +237,6 @@ class AnnihilationTracker(commands.Cog):
                 view=ReportAnnihilationView(interaction.user, new_ts, self.save_annihilation)
             )
 
-        # Save the new report directly if no active one exists
         self.save_annihilation(new_ts)
         await interaction.followup.send(
             embed=discord.Embed(
@@ -180,17 +249,7 @@ class AnnihilationTracker(commands.Cog):
 
 
 class ReportAnnihilationView(View):
-    """
-    Interactive confirmation view for overwriting an existing Annihilation time.
-    """
-
     def __init__(self, author: discord.User, new_timestamp: int, func, timeout: float = 30.0):
-        """
-        Args:
-            author (discord.User): The user who initiated the overwrite request.
-            new_timestamp (int): The proposed new Annihilation time.
-            timeout (float): How long (in seconds) the confirmation stays active.
-        """
         super().__init__(timeout=timeout)
         self.author = author
         self.new_timestamp = new_timestamp
@@ -200,9 +259,6 @@ class ReportAnnihilationView(View):
 
 
     async def interaction_check(self, interaction: Interaction) -> bool:
-        """
-        Only allow the original author to interact with this confirmation view.
-        """
         if interaction.user.id != self.author.id:
             await interaction.response.send_message(
                 "Only the user who initiated this command can confirm it.",
@@ -214,9 +270,6 @@ class ReportAnnihilationView(View):
 
     @discord.ui.button(label="Confirm", style=ButtonStyle.success)
     async def confirm(self, interaction: Interaction, button: Button):
-        """
-        Callback for confirm button
-        """
         self.confirmed = True
         await interaction.response.edit_message(
             embed=discord.Embed(
@@ -234,17 +287,15 @@ class ReportAnnihilationView(View):
 
 
 
-# Cog setup function for bot
 async def setup(bot: commands.Bot):
     cog = AnnihilationTracker(bot)
     await bot.add_cog(cog)
 
-    # Remove existing global command to avoid duplicates
-    existing_global = bot.tree.get_command("report_annihilation")
-    if existing_global:
-        bot.tree.remove_command("report_annihilation")
+    for command in (cog.report_annihilation, cog.annihilation_reminder):
+        if bot.tree.get_command(command.name):
+            bot.tree.remove_command(command.name)
 
-    # Register the command for each ANO guild
     for guild_id in config.ANO_COMMANDS_GUILD_IDS:
         guild = discord.Object(id=int(guild_id))
         bot.tree.add_command(cog.report_annihilation, guild=guild)
+        bot.tree.add_command(cog.annihilation_reminder, guild=guild)
