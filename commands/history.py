@@ -30,6 +30,16 @@ def capitalrank(value):
     rank = rankv(value)
     return rank.title() if rank else "N/A"
 
+def latestrecord(join_logs, activity_logs):
+    timestamps = []
+    for entries, key in ((join_logs, "date"), (activity_logs, "timestamp")):
+        for entry in entries:
+            try:
+                timestamps.append(int(entry[key]))
+            except (KeyError, TypeError, ValueError):
+                continue
+    return max(timestamps, default=None)
+
 def builderh(join_logs, activity_logs):
     transitions = []
     activities = []
@@ -152,15 +162,10 @@ def builderh(join_logs, activity_logs):
         states.append([guild, rank, timestamp, timestamp])
 
     history = []
-    for guild, rank, timestamp, _ in states:
-        if not history:
-            history.append([guild, rank or "N/A", None, None])
-        else:
-            history[-1][2] = timestamp
-            history.append([guild, rank or "N/A", timestamp, None])
-
-    if history and states:
-        history[-1][3] = min(state[3] for state in states)
+    for index, (guild, rank, latest_timestamp, earliest_timestamp) in enumerate(states):
+        join_timestamp = earliest_timestamp
+        leave_timestamp = latest_timestamp if index > 0 else None
+        history.append([guild, rank or "N/A", join_timestamp, leave_timestamp])
 
     return [row for row in history if row[0]]
 
@@ -196,7 +201,9 @@ class History(commands.Cog):
                 api_guild = gname(guild_info.get("name"))
                 api_rank = rankv(guild_info.get("rank")) or "N/A"
                 if api_guild and history and gkey(history[0][0]) != gkey(api_guild):
-                    history.insert(0, [api_guild, api_rank, None, history[0][2]])
+                    boundary = latestrecord(join_logs, activity_logs)
+                    history[0][3] = boundary
+                    history.insert(0, [api_guild, api_rank, boundary, None])
                 elif api_guild and history:
                     history[0][1] = api_rank
                 elif api_guild:
@@ -208,7 +215,7 @@ class History(commands.Cog):
             return await interaction.followup.send(embed=ErrorEmbed("No guild history found for this player."))
 
         rows = []
-        for guild, rank, leave, join in history:
+        for guild, rank, join, leave in history:
             join_str = datetime.fromtimestamp(join).strftime("%d %b %Y %H:%M") if join else "N/A"
             leave_str = datetime.fromtimestamp(leave).strftime("%d %b %Y %H:%M") if leave else "N/A"
             rows.append([guild, capitalrank(rank), join_str, leave_str])
