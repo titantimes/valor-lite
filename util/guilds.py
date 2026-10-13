@@ -5,22 +5,8 @@ from util.requests import request
 
 
 async def guild_name_from_tag(tag: str) -> str:
-    """
-    Retrieve the guild name corresponding to a given guild tag.
-    
-    Args:
-        tag (str): The guild tag to look up.
-        
-    Returns:
-        str | None: The name of the guild, or None if not found or invalid.
-    
-    Notes:
-        - Tags containing "--" or ";" are considered invalid and return None.
-        - If multiple entries have the same priority, this function queries the Wynncraft API
-          to determine the one with the highest member count.
-    """
     if "--" in tag or ";" in tag:
-        return None  # Skip invalid tags
+        return None
     
     guilds = await Database.fetch(
         "SELECT guild, tag, priority FROM guild_tag_name WHERE LOWER(tag)=%s ORDER BY priority DESC",
@@ -60,22 +46,8 @@ async def guild_name_from_tag(tag: str) -> str:
 
 
 async def guild_tag_from_name(name: str) -> str:
-    """
-    Retrieve the guild tag corresponding to a given guild name.
-    
-    Args:
-        name (str): The full guild name to look up.
-        
-    Returns:
-        str | None: The guild tag, or None if not found or invalid.
-    
-    Notes:
-        - Names containing "--" or ";" are considered invalid.
-        - If multiple entries have the same priority, the Wynncraft API is used
-          to select the guild with the highest member count.
-    """
     if "--" in name or ";" in name:
-        return None  # Skip invalid names
+        return None
     
     guilds = await Database.fetch(
         "SELECT guild, tag, priority FROM guild_tag_name WHERE LOWER(guild)=%s ORDER BY priority DESC",
@@ -83,7 +55,7 @@ async def guild_tag_from_name(name: str) -> str:
     )
     
     if not guilds:
-        return None  # No guild found
+        return None
     
     if len(guilds) >= 2 and guilds[0]["priority"] == guilds[1]["priority"]:
         top_priority = guilds[0]["priority"]
@@ -118,12 +90,10 @@ async def guild_names_from_tags(tags: List[str]) -> Tuple[list[str], list[str]]:
     name_map: dict[str, str] = {}
     unidentified: list[str] = []
 
-    # Clean input (skip obviously invalid tags)
     valid_tags = [t for t in tags if "--" not in t and ";" not in t]
     if not valid_tags:
         return [None] * len(tags), tags  # All tags invalid
 
-    # Batch DB lookup for efficiency
     placeholders = ",".join(["%s"] * len(valid_tags))
     query = f"""
         SELECT tag, guild
@@ -170,7 +140,6 @@ async def guild_tags_from_names(names: List[str]) -> Tuple[MutableSet[str], List
     if not valid_names:
         return [None] * len(names), names  # All invalid
 
-    # Batch DB lookup
     placeholders = ",".join(["%s"] * len(valid_names))
     query = f"""
         SELECT guild, tag
@@ -180,17 +149,14 @@ async def guild_tags_from_names(names: List[str]) -> Tuple[MutableSet[str], List
     """
     rows = await Database.fetch(query, tuple(n.lower() for n in valid_names))
 
-    # Choose first occurrence (highest priority)
     for row in rows:
         gname = row["guild"].lower()
         if gname not in tag_map:
             tag_map[gname] = row["tag"]
 
-    # Identify names missing in DB
     db_identified = set(tag_map.keys())
     missing = [n for n in valid_names if n.lower() not in db_identified]
 
-    # Fallback: Try API-based resolution
     if missing:
         fallback_results = await asyncio.gather(*(guild_tag_from_name(n) for n in missing))
         for name, tag in zip(missing, fallback_results):
@@ -200,7 +166,6 @@ async def guild_tags_from_names(names: List[str]) -> Tuple[MutableSet[str], List
             else:
                 unidentified.append(name)
 
-    # Preserve order, keep casing
     final_tags = []
     for name in names:
         lname = name.lower() if name else None
@@ -213,15 +178,6 @@ async def guild_tags_from_names(names: List[str]) -> Tuple[MutableSet[str], List
 
 
 async def player_guild_from_uuid(uuid: str) -> str:
-    """
-    Get the latest guild a player has joined using their UUID.
-    
-    Args:
-        uuid (str): The player's UUID.
-        
-    Returns:
-        str | None: The guild name, or None if the player has no recorded guild.
-    """
     result = await Database.fetch(
         "SELECT joined FROM guild_join_log WHERE uuid=%s ORDER BY date DESC LIMIT 1", (uuid,)
     )
@@ -230,15 +186,6 @@ async def player_guild_from_uuid(uuid: str) -> str:
 
 
 async def player_guilds_from_uuids(uuids: list[str]) -> dict[str, str]:
-    """
-    Get the latest guilds for multiple players.
-    
-    Args:
-        uuids (list[str]): List of player UUIDs.
-        
-    Returns:
-        dict[str, str]: A mapping of UUID -> latest joined guild.
-    """
     if not uuids:
         return {}
 
@@ -253,7 +200,7 @@ async def player_guilds_from_uuids(uuids: list[str]) -> dict[str, str]:
 
     player_guilds = {}
     for row in rows:
-        if row["uuid"] not in player_guilds:  # Keep first occurrence (latest due to ORDER BY)
+        if row["uuid"] not in player_guilds:
             player_guilds[row["uuid"]] = row["joined"]
 
     return player_guilds
