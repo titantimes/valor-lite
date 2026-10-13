@@ -23,26 +23,38 @@ async def guild_name_from_tag(tag: str) -> str:
         return None  # Skip invalid tags
     
     guilds = await Database.fetch(
-        f"SELECT * FROM guild_tag_name WHERE LOWER(tag)='{tag.lower()}' ORDER BY priority DESC"
+        "SELECT guild, tag, priority FROM guild_tag_name WHERE LOWER(tag)=%s ORDER BY priority DESC",
+        (tag.lower(),)
     )
     
-    if not len(guilds):
-        return None  # No guild found in DB
+    if not guilds:
+        return None
         
-    # If there are ties in priority, break tie by member count
     if len(guilds) >= 2 and guilds[0]["priority"] == guilds[1]["priority"]:
-        revisions = []
-        for g, tag, _ in guilds:
-            res = request(f"https://api.wynncraft.com/v3/guild/{g}")
-            n_members = res["members"]["total"]
-            revisions.append(f"('{g}','{tag}',{n_members})")
+        top_priority = guilds[0]["priority"]
+        tied_guilds = [g for g in guilds if g["priority"] == top_priority]
 
-        # Update DB with member counts
-        await Database.fetch(f"REPLACE INTO guild_tag_name VALUES " + ','.join(revisions))
-        # Sort by member count (descending)
-        revisions.sort(key=lambda x: x[2], reverse=True)
-        
-        return revisions[0]["guild"]
+        updated_guilds = []
+        for g_row in tied_guilds:
+            g = g_row["guild"]
+            t = g_row["tag"]
+            res = await request(f"https://api.wynncraft.com/v3/guild/{g}")
+            n_members = 0
+            if isinstance(res, dict) and "members" in res and isinstance(res["members"], dict):
+                n_members = res["members"].get("total", 0)
+            updated_guilds.append({"guild": g, "tag": t, "priority": n_members})
+
+        if updated_guilds:
+            placeholders = ", ".join(["(%s, %s, %s)"] * len(updated_guilds))
+            params = []
+            for item in updated_guilds:
+                params.extend([item["guild"], item["tag"], item["priority"]])
+            await Database.execute(
+                f"REPLACE INTO guild_tag_name (guild, tag, priority) VALUES {placeholders}",
+                tuple(params)
+            )
+            updated_guilds.sort(key=lambda x: x["priority"], reverse=True)
+            return updated_guilds[0]["guild"]
     
     return guilds[0]["guild"]
 
@@ -58,48 +70,51 @@ async def guild_tag_from_name(name: str) -> str:
         str | None: The guild tag, or None if not found or invalid.
     
     Notes:
-        - Names containing "-" or ";" are considered invalid.
+        - Names containing "--" or ";" are considered invalid.
         - If multiple entries have the same priority, the Wynncraft API is used
           to select the guild with the highest member count.
     """
-    if "-" in name or ";" in name:
+    if "--" in name or ";" in name:
         return None  # Skip invalid names
     
     guilds = await Database.fetch(
-        "SELECT * FROM guild_tag_name WHERE LOWER(guild)=%s ORDER BY priority DESC",
-        (name.lower())
+        "SELECT guild, tag, priority FROM guild_tag_name WHERE LOWER(guild)=%s ORDER BY priority DESC",
+        (name.lower(),)
     )
     
-    if not len(guilds):
+    if not guilds:
         return None  # No guild found
     
     if len(guilds) >= 2 and guilds[0]["priority"] == guilds[1]["priority"]:
-        revisions = []
-        for g, tag, _ in guilds:
-            res = request(f"https://api.wynncraft.com/v3/guild/{g}")
-            n_members = res["members"]["total"]
-            revisions.append(f"('{g}','{tag}',{n_members})")
+        top_priority = guilds[0]["priority"]
+        tied_guilds = [g for g in guilds if g["priority"] == top_priority]
 
-        await Database.fetch(f"REPLACE INTO guild_tag_name VALUES " + ','.join(revisions))
-        revisions.sort(key=lambda x: x[2], reverse=True)
-        
-        return revisions[0]["tag"]
+        updated_guilds = []
+        for g_row in tied_guilds:
+            g = g_row["guild"]
+            t = g_row["tag"]
+            res = await request(f"https://api.wynncraft.com/v3/guild/{g}")
+            n_members = 0
+            if isinstance(res, dict) and "members" in res and isinstance(res["members"], dict):
+                n_members = res["members"].get("total", 0)
+            updated_guilds.append({"guild": g, "tag": t, "priority": n_members})
+
+        if updated_guilds:
+            placeholders = ", ".join(["(%s, %s, %s)"] * len(updated_guilds))
+            params = []
+            for item in updated_guilds:
+                params.extend([item["guild"], item["tag"], item["priority"]])
+            await Database.execute(
+                f"REPLACE INTO guild_tag_name (guild, tag, priority) VALUES {placeholders}",
+                tuple(params)
+            )
+            updated_guilds.sort(key=lambda x: x["priority"], reverse=True)
+            return updated_guilds[0]["tag"]
     
     return guilds[0]["tag"]
 
 
 async def guild_names_from_tags(tags: List[str]) -> Tuple[list[str], list[str]]:
-    """
-    Convert a list of guild tags into their corresponding guild names.
-    
-    Args:
-        tags (List[str]): A list of guild tags.
-        
-    Returns:
-        Tuple[list[str], list[str]]:
-            - List of guild names (matching order of input list, None if not found)
-            - List of unidentified tags that couldn't be resolved
-    """
     name_map: dict[str, str] = {}
     unidentified: list[str] = []
 
@@ -118,17 +133,14 @@ async def guild_names_from_tags(tags: List[str]) -> Tuple[list[str], list[str]]:
     """
     rows = await Database.fetch(query, tuple(t.lower() for t in valid_tags))
 
-    # Choose first occurrence (highest priority due to ORDER BY)
     for row in rows:
         t = row["tag"].lower()
         if t not in name_map:
             name_map[t] = row["guild"]
 
-    # Identify tags not found in DB
     db_identified = set(name_map.keys())
     missing = [t for t in valid_tags if t.lower() not in db_identified]
 
-    # Fallback: Try individual API-based lookups
     if missing:
         fallback_results = await asyncio.gather(*(guild_name_from_tag(t) for t in missing))
         for tag, name in zip(missing, fallback_results):
@@ -138,7 +150,6 @@ async def guild_names_from_tags(tags: List[str]) -> Tuple[list[str], list[str]]:
             else:
                 unidentified.append(tag)
 
-    # Preserve original input order, keep casing
     final_names = []
     for tag in tags:
         ltag = tag.lower()
@@ -151,22 +162,11 @@ async def guild_names_from_tags(tags: List[str]) -> Tuple[list[str], list[str]]:
 
 
 async def guild_tags_from_names(names: List[str]) -> Tuple[MutableSet[str], List[str]]:
-    """
-    Convert a list of guild names into their corresponding tags.
-    
-    Args:
-        names (List[str]): A list of guild names.
-        
-    Returns:
-        Tuple[list[str], list[str]]:
-            - List of guild tags (matching order of input list, None if not found)
-            - List of unidentified names that couldn't be resolved
-    """
+
     tag_map = {}
     unidentified = []
 
-    # Clean input (skip invalid names)
-    valid_names = [n for n in names if n and "-" not in n and ";" not in n]
+    valid_names = [n for n in names if n and "--" not in n and ";" not in n]
     if not valid_names:
         return [None] * len(names), names  # All invalid
 
@@ -223,7 +223,7 @@ async def player_guild_from_uuid(uuid: str) -> str:
         str | None: The guild name, or None if the player has no recorded guild.
     """
     result = await Database.fetch(
-        "SELECT joined FROM guild_join_log WHERE uuid=%s ORDER BY date DESC LIMIT 1", (uuid)
+        "SELECT joined FROM guild_join_log WHERE uuid=%s ORDER BY date DESC LIMIT 1", (uuid,)
     )
     guild = None if not result else result[0]["joined"]
     return guild
