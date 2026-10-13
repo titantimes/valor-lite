@@ -1,11 +1,11 @@
-import discord, io, math, os
+import discord, io, math, os, tempfile, time
 from PIL import Image, ImageDraw, ImageFont
 
 from core.settings import SettingsManager
 from util.embeds import TextTableEmbed, PaginatedTextTable
 from util.guilds import guild_tags_from_names
 from util.mappings import UI_EMOJI_MAP
-from util.requests import fetch_player_busts
+from util.requests import fetch_player_busts, request
 
 
 FONT_PATHS = [
@@ -24,6 +24,20 @@ def _resolve_font_path() -> str:
             if os.path.exists(candidate):
                 return candidate
     return FONT_PATHS[0]
+
+
+def assetp(filename: str) -> str:
+    base_dir = os.path.dirname(os.path.dirname(__file__))
+    candidates = [
+        filename,
+        os.path.join(base_dir, filename),
+        os.path.join("assets", filename),
+        os.path.join(base_dir, "assets", filename),
+    ]
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+    return filename
 
 
 def format_board_table_text(
@@ -213,8 +227,8 @@ class WarcountBoardView(discord.ui.View):
 
 
     async def update_message(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         if self.is_fancy:
-            await interaction.response.defer()
             content = await build_warcount_board(self.data, self.page, self.listed_classes)
             await interaction.edit_original_response(content="", view=self, attachments=[content])
         else:
@@ -233,7 +247,7 @@ class WarcountBoardView(discord.ui.View):
             lines.append(separator)
 
             content = '```isbl\n' + '\n'.join(lines) + '```'
-            await interaction.response.edit_message(content=content, view=self, attachments=[])
+            await interaction.edit_original_response(content=content, view=self, attachments=[])
 
 
     @discord.ui.button(emoji=UI_EMOJI_MAP["left_arrow"])
@@ -242,7 +256,7 @@ class WarcountBoardView(discord.ui.View):
             self.page -= 1
             await self.update_message(interaction)
         else:
-            await interaction.response.defer()
+            await interaction.response.send_message("You are at the first page!", ephemeral=True)
 
 
     @discord.ui.button(emoji=UI_EMOJI_MAP["right_arrow"])
@@ -251,7 +265,12 @@ class WarcountBoardView(discord.ui.View):
             self.page += 1
             await self.update_message(interaction)
         else:
-            await interaction.response.defer()
+            await interaction.response.send_message("You are at the last page!", ephemeral=True)
+
+    @discord.ui.button(emoji=UI_EMOJI_MAP.get("newspaper", "📰"))
+    async def toggle_table_view(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.is_fancy = not self.is_fancy
+        await self.update_message(interaction)
 
 
 
@@ -479,3 +498,239 @@ async def build_warcount_board(
     img_binary.seek(0)
 
     return discord.File(fp=img_binary, filename="board.png")
+
+async def get_player_avatar(username: str, uuid: str = None) -> Image.Image:
+    tmp_path = os.path.join(tempfile.gettempdir(), f"{username}_model.png")
+    legacy_tmp = f"/tmp/{username}_model.png"
+
+    for path in (tmp_path, legacy_tmp):
+        if os.path.exists(path) and time.time() - os.path.getmtime(path) < 86400:
+            try:
+                return Image.open(path).convert("RGBA")
+            except Exception:
+                pass
+
+    target = uuid if uuid else username
+    try:
+        headers = {"User-Agent": "valor-bot/1.0"}
+        model_data = await request(
+            f"https://visage.surgeplay.com/bust/{target}.png",
+            headers=headers,
+            return_type="image",
+        )
+        if model_data:
+            with open(tmp_path, "wb") as f:
+                f.write(model_data)
+            return Image.open(tmp_path).convert("RGBA")
+    except Exception:
+        pass
+
+    unknown_path = assetp("unknown_model.png")
+    if os.path.exists(unknown_path):
+        try:
+            return Image.open(unknown_path).convert("RGBA")
+        except Exception:
+            pass
+
+    return Image.new("RGBA", (64, 64), (60, 60, 65, 255))
+
+
+async def build_history_board(
+    username: str,
+    uuid: str,
+    data: list[list[str]],
+    page: int,
+    rows_per_page: int = 10,
+    total_guilds: int = None,
+) -> discord.File:
+    start = page * rows_per_page
+    end = start + rows_per_page
+    sliced = data[start:end]
+
+    total_count = total_guilds if total_guilds is not None else len(data)
+    total_pages = max(1, math.ceil(len(data) / rows_per_page))
+
+    board_width = 820
+    header_h = 75
+    col_header_h = 32
+    row_spacing = 68
+    footer_h = 24
+    rows_count = max(1, len(sliced))
+    board_height = 8 + header_h + 10 + col_header_h + 8 + (rows_count * row_spacing) + footer_h + 8
+    board = Image.new("RGBA", (board_width, board_height), (32, 34, 38))
+    draw = ImageDraw.Draw(board)
+
+    font_path = _resolve_font_path()
+    title_font = ImageFont.truetype(font_path, 24)
+    header_font = ImageFont.truetype(font_path, 17)
+    font = ImageFont.truetype(font_path, 18)
+    font_small = ImageFont.truetype(font_path, 15)
+    font_sub = ImageFont.truetype(font_path, 14)
+    font_tiny = ImageFont.truetype(font_path, 12)
+
+    draw.rounded_rectangle(
+        [(8, 8), (board_width - 8, 8 + header_h)],
+        radius=8,
+        fill=(42, 45, 52),
+        outline=(58, 62, 72),
+        width=1,
+    )
+
+    avatar_img = await get_player_avatar(username, uuid)
+    avatar_img = avatar_img.resize((54, 54))
+    mask = avatar_img.getchannel("A") if "A" in avatar_img.getbands() else None
+    board.paste(avatar_img, (18, 18), mask)
+
+    draw.text((84, 20), username, font=title_font, fill=(255, 255, 255))
+    draw.text(
+        (86, 48),
+        f"Guild Membership Timeline  •  {total_count} Guilds Recorded",
+        font=font_sub,
+        fill=(160, 168, 185),
+    )
+    draw.text(
+        (board_width - 24, 34),
+        f"Page {page + 1}/{total_pages}",
+        font=header_font,
+        fill=(200, 205, 215),
+        anchor="ra",
+    )
+
+    col_y = 8 + header_h + 8
+    draw.rounded_rectangle(
+        [(8, col_y), (board_width - 8, col_y + col_header_h)],
+        radius=5,
+        fill=(45, 48, 56),
+    )
+    draw.text((78, col_y + 8), "GUILD", font=header_font, fill=(210, 215, 225))
+    draw.text((360, col_y + 8), "RANK", font=header_font, fill=(210, 215, 225))
+    draw.text((515, col_y + 8), "JOINED", font=header_font, fill=(210, 215, 225))
+    draw.text((675, col_y + 8), "LEFT", font=header_font, fill=(210, 215, 225))
+
+    seg_path = assetp("board_segment.png")
+    seg_dark_path = assetp("board_segment_dark.png")
+    overlay = Image.open(seg_path)
+    overlay2 = Image.open(seg_dark_path)
+    ov1 = overlay.resize((board_width - 16, 64))
+    ov2 = overlay2.resize((board_width - 16, 64))
+
+    fallback_icon_path = assetp("icons/gamemodes/guild.png")
+    if os.path.exists(fallback_icon_path):
+        fallback_icon = Image.open(fallback_icon_path).convert("RGBA").resize((46, 46))
+    else:
+        fallback_icon = Image.new("RGBA", (46, 46), (70, 75, 85, 255))
+
+    guild_names = [row[0] for row in sliced]
+    tags, _ = await guild_tags_from_names(guild_names)
+    #not sure if these make sense to be honest might change later
+    rank_colors = {
+        "owner": (255, 180, 0),
+        "leader": (255, 180, 0),
+        "chief": (255, 95, 95),
+        "strategist": (85, 225, 255),
+        "captain": (195, 115, 255),
+        "recruiter": (100, 240, 120),
+        "recruit": (215, 215, 225),
+    }
+
+    y_start = col_y + col_header_h + 6
+    for idx, row in enumerate(sliced):
+        guild = str(row[0])
+        rank = str(row[1])
+        joined = str(row[2])
+        left = str(row[3])
+        tag = tags[idx] if idx < len(tags) else None
+        curr_y = y_start + (idx * row_spacing)
+        seg = ov1 if idx % 2 == 0 else ov2
+        board.paste(seg, (8, curr_y), seg)
+
+        g_icon = fallback_icon
+        if tag:
+            icon_file = assetp(f"icons/guilds/{tag}.png")
+            if os.path.exists(icon_file):
+                try:
+                    g_icon = Image.open(icon_file).convert("RGBA").resize((46, 46))
+                except Exception:
+                    g_icon = fallback_icon
+
+        board.paste(g_icon, (20, curr_y + 9), g_icon.getchannel("A") if "A" in g_icon.getbands() else None)
+        g_font = font if len(guild) <= 22 else font_small
+        draw.text((78, curr_y + 22), guild, font=g_font, fill=(255, 255, 255))
+        r_color = rank_colors.get(rank.lower(), (200, 200, 200))
+        draw.text((360, curr_y + 22), rank, font=font, fill=r_color)
+        draw.text((515, curr_y + 22), joined, font=font, fill=(215, 220, 230))
+        l_color = (100, 245, 130) if left.lower() == "current" else (215, 220, 230)
+        draw.text((675, curr_y + 22), left, font=font, fill=l_color)
+
+    footer_y = y_start + (rows_count * row_spacing) + 4
+    draw.text(
+        (12, footer_y),
+        "* Membership tracking updated 29 Sep 2026. Most entries at this date will be prior to it.",
+        font=font_tiny,
+        fill=(130, 136, 150),
+    )
+
+    with io.BytesIO() as img_binary:
+        board.save(img_binary, "PNG")
+        img_binary.seek(0)
+        return discord.File(fp=img_binary, filename="history_board.png")
+
+
+class HistoryBoardView(discord.ui.View):
+    def __init__(
+        self,
+        user_id: int,
+        username: str,
+        uuid: str,
+        rows: list[list[str]],
+        headers: list[str] = None,
+        timeout: int = 120,
+    ):
+        super().__init__(timeout=timeout)
+        self.user_id = user_id
+        self.username = username
+        self.uuid = uuid
+        self.data = rows
+        self.headers = headers or ["Guild", "Rank", "Joined", "Left"]
+        self.page = 0
+        self.max_pages = max(1, math.ceil(len(rows) / 10))
+
+        setting = SettingsManager("user", user_id).get("preferred_leaderboard_output_type")
+        self.is_fancy = True if setting == "image" else False
+
+    @discord.ui.button(emoji=UI_EMOJI_MAP["left_arrow"], row=1)
+    async def previous(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.page > 0:
+            self.page -= 1
+            await self.update(interaction)
+        else:
+            await interaction.response.send_message("You are at the first page!", ephemeral=True)
+
+    @discord.ui.button(emoji=UI_EMOJI_MAP["right_arrow"], row=1)
+    async def next(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.page < self.max_pages - 1:
+            self.page += 1
+            await self.update(interaction)
+        else:
+            await interaction.response.send_message("You are at the last page!", ephemeral=True)
+
+    @discord.ui.button(emoji=UI_EMOJI_MAP.get("newspaper", "📰"), row=1)
+    async def toggle_table_view(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.is_fancy = not self.is_fancy
+        await self.update(interaction)
+
+    async def update(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+
+        if self.is_fancy:
+            board = await build_history_board(self.username, self.uuid, self.data, self.page)
+            await interaction.edit_original_response(content=None, embed=None, view=self, attachments=[board])
+        else:
+            table = format_board_table_text(
+                self.headers,
+                self.data,
+                self.page,
+                title=f"Guild History of {self.username}",
+                show_rank=False,
+            )
+            await interaction.edit_original_response(content=table, embed=None, view=self, attachments=[])

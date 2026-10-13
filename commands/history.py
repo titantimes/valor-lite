@@ -5,7 +5,8 @@ from datetime import datetime
 
 from core.antispam import rate_limit_check
 from database import Database
-from util.embeds import ErrorEmbed, PaginatedTextTable
+from util.board import HistoryBoardView, build_history_board, format_board_table_text
+from util.embeds import ErrorEmbed
 from util.requests import request
 from util.uuid import get_uuid_from_name
 
@@ -186,10 +187,10 @@ class History(commands.Cog):
             return await interaction.followup.send(embed=ErrorEmbed("Player not found."))
 
         join_logs = await Database.fetch(
-            "SELECT * FROM guild_join_log WHERE uuid=%s ORDER BY date DESC", (uuid)
+            "SELECT * FROM guild_join_log WHERE uuid=%s ORDER BY date DESC", (uuid,)
         )
         activity_logs = await Database.fetch(
-            "SELECT * FROM activity_members WHERE uuid=%s ORDER BY timestamp DESC", (uuid)
+            "SELECT * FROM activity_members WHERE uuid=%s ORDER BY timestamp DESC", (uuid,)
         )
 
         history = builderh(join_logs, activity_logs)
@@ -215,19 +216,33 @@ class History(commands.Cog):
             return await interaction.followup.send(embed=ErrorEmbed("No guild history found for this player."))
 
         rows = []
-        for guild, rank, join, leave in history:
-            join_str = datetime.fromtimestamp(join).strftime("%d %b %Y %H:%M") if join else "N/A"
-            leave_str = datetime.fromtimestamp(leave).strftime("%d %b %Y %H:%M") if leave else "N/A"
+        for idx, (guild, rank, join, leave) in enumerate(history):
+            join_str = datetime.fromtimestamp(join).strftime("%d %b %Y") if join else "N/A"
+            if leave:
+                leave_str = datetime.fromtimestamp(leave).strftime("%d %b %Y")
+            else:
+                leave_str = "Current" if idx == 0 else "N/A"
             rows.append([guild, capitalrank(rank), join_str, leave_str])
 
-        await PaginatedTextTable.send(
-            interaction,
-            ["Guild", "Rank", "Join Date", "Leave Date"],
+        view = HistoryBoardView(
+            interaction.user.id,
+            username,
+            uuid,
             rows,
-            title=f"Guild History of {username}",
-            footer="Membership tracking updated 29 Sep 2026. Most entries at this date will be prior to it.",
-            rows_per_page=15
         )
+
+        if view.is_fancy:
+            board = await build_history_board(username, uuid, view.data, view.page)
+            return await interaction.followup.send(file=board, view=view)
+        else:
+            table = format_board_table_text(
+                view.headers,
+                view.data,
+                view.page,
+                title=f"Guild History of {username}",
+                show_rank=False,
+            )
+            return await interaction.followup.send(content=table, view=view)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(History(bot))
