@@ -622,7 +622,6 @@ async def build_history_board(
 
     guild_names = [row[0] for row in sliced]
     tags, _ = await guild_tags_from_names(guild_names)
-    #not sure if these make sense to be honest might change later
     rank_colors = {
         "owner": (255, 180, 0),
         "leader": (255, 180, 0),

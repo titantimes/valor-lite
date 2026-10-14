@@ -88,7 +88,7 @@ def create_terrchange_embed(old_territory, new_territory, for_ano: bool = False)
 class TerritoryTrackerService(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.territory_data = fetch_territory_data()  # Store the latest territory data
+        self.territory_data = fetch_territory_data()
         self.terryitory_tracker_loop.start()
 
 
@@ -96,7 +96,7 @@ class TerritoryTrackerService(commands.Cog):
         self.terryitory_tracker_loop.cancel()
 
 
-    @tasks.loop(minutes=1)  # Repeat every minute to check for updates
+    @tasks.loop(minutes=1)
     async def terryitory_tracker_loop(self):
         try:
             await self._track_once()
@@ -135,7 +135,7 @@ class TerritoryTrackerService(commands.Cog):
                 except Exception:
                     logging.exception(f"Territory Tracker: failed to post change for {territory.get('territory')}")
 
-        self.territory_data = updated_data  # Update the stored data for the next loop iteration
+        self.territory_data = updated_data
 
 
     @terryitory_tracker_loop.before_loop
