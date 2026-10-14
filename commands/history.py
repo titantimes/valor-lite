@@ -1,6 +1,7 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
+from bisect import bisect_left
 from datetime import datetime
 
 from core.antispam import rate_limit_check
@@ -11,6 +12,7 @@ from util.requests import request
 from util.uuid import get_uuid_from_name
 
 MERGE_WINDOW_SECONDS = 3600
+JOIN_LOG_PRIORITY_SECONDS = 86400
 
 def gname(value):
     if not isinstance(value, str):
@@ -72,6 +74,13 @@ def builderh(join_logs, activity_logs):
         guild = gname(entry.get("guild"))
         if guild:
             activities.append({"timestamp": timestamp, "guild": guild})
+
+    transition_times = sorted(event["timestamp"] for event in transitions)
+    if transition_times:
+        def near_transition(timestamp):
+            i = bisect_left(transition_times, timestamp - JOIN_LOG_PRIORITY_SECONDS)
+            return i < len(transition_times) and transition_times[i] <= timestamp + JOIN_LOG_PRIORITY_SECONDS
+        activities = [event for event in activities if not near_transition(event["timestamp"])]
 
     records = [
         (event["timestamp"], "transition", event) for event in transitions
