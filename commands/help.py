@@ -12,9 +12,6 @@ class HelpCog(commands.Cog):
         description="Get information about the bot and where to find support."
     )
     async def help(self, interaction: discord.Interaction):
-        """
-        Sends a help/info embed with links, support info, and context about Valor Lite.
-        """
         await interaction.response.defer()
 
         # Embed setup
@@ -31,12 +28,10 @@ class HelpCog(commands.Cog):
             colour=discord.Color.blurple()
         )
 
-        # Thumbnail (bot logo/sticker)
         embed.set_thumbnail(
             url="https://media.discordapp.net/stickers/861507133232250940.webp?size=320&quality=lossless"
         )
 
-        # Add sections
         embed.add_field(
             name="📢 Updates & Announcements",
             value="Join our discord server "
@@ -49,16 +44,12 @@ class HelpCog(commands.Cog):
             inline=False
         )
 
-        # Footer
         embed.set_footer(
             text="Made and powered by Titans Valor",
             icon_url="https://media.discordapp.net/stickers/861507133232250940.webp?size=320&quality=lossless"
         )
 
-        # Send embed
         await interaction.followup.send(embed=embed)
 
-
-# Cog setup function for bot
 async def setup(bot: commands.Bot):
     await bot.add_cog(HelpCog(bot))

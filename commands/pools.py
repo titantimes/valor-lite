@@ -9,15 +9,8 @@ from util.requests import request_with_csrf
 
 
 class Pools(commands.Cog):
-    """
-    Cog providing commands for viewing Wynncraft Loot Pools and Aspect Pools with interactive select menus.
-    Fetches data from the nori.fish API with CSRF token support.
-    """
-
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-
-    # --- Constants for mapping pool keys to human-readable names and API keys ---
 
     LOOT_POOL_NAME_MAP = {
         "silent_expanse": "Silent Expanse",
@@ -55,7 +48,6 @@ class Pools(commands.Cog):
         "twp": "TWP"
     }
 
-    # Base API URLs and resource URLs
     BASE_URL = "https://nori.fish"
     TOKEN_URL = f"{BASE_URL}/api/tokens"
     LOOTPOOL_URL = f"{BASE_URL}/api/lootpool"
@@ -64,19 +56,10 @@ class Pools(commands.Cog):
     ASPECT_ICON_URL = "https://nori.fish/resources/aspect.gif"
 
 
-    # === Loot Pool Section ===
 
     async def build_loot_embed(self, pool_key: str | None = None) -> discord.Embed | ErrorEmbed:
-        """
-        Builds an embed showing loot pool information.
-
-        If pool_key is None, show overview of all loot pools.
-        Otherwise, show detailed mythics and rarities for the selected loot pool.
-        """
-        # Fetch loot pool data with CSRF token support
         data = (await request_with_csrf(self.TOKEN_URL, self.LOOTPOOL_URL))["Loot"]
 
-        # Overview embed for all loot pools
         if pool_key is None:
             embed = discord.Embed(
                 title="Loot Pool Overview",
@@ -89,7 +72,6 @@ class Pools(commands.Cog):
                 if not pool:
                     continue
 
-                # Build field listing shiny and mythic items
                 field = ""
                 shiny = pool.get("Shiny")
                 mythics = pool.get("Mythic", [])
@@ -108,7 +90,6 @@ class Pools(commands.Cog):
             embed.set_thumbnail(url=self.LOOTRUN_ICON_URL)
             return embed
 
-        # Detailed embed for specific loot pool key
         api_name = self.LOOT_POOL_API_MAP[pool_key]
         pool = data.get(api_name)
         if not pool:
@@ -119,11 +100,9 @@ class Pools(commands.Cog):
             color=discord.Colour.from_rgb(74, 86, 219)
         )
 
-        # Extract and remove shiny and mythics from pool dict so we can handle rarities separately
         shiny = pool.pop("Shiny", None)
         mythics = pool.pop("Mythic", [])
 
-        # Format shiny and mythics
         text = ""
         if shiny:
             icon = EMOJI_MAP.get(ITEM_TO_EMOJI_MAP.get(shiny['Item']), "")
@@ -134,7 +113,6 @@ class Pools(commands.Cog):
             text += f"- {icon} {item}\n"
         embed.add_field(name="Mythics", value=text or "None", inline=False)
 
-        # Add remaining rarities with their items
         for rarity, items in pool.items():
             field = "\n".join(f"- {item}" for item in items)
             embed.add_field(name=rarity, value=field or "None", inline=False)
@@ -144,10 +122,6 @@ class Pools(commands.Cog):
 
 
     class LootPoolSelect(discord.ui.Select):
-        """
-        Select menu for choosing a loot pool.
-        """
-
         def __init__(self, cog: "Pools"):
             self.cog = cog
             options = [
@@ -157,18 +131,11 @@ class Pools(commands.Cog):
             super().__init__(placeholder="Choose a loot pool...", options=options)
 
         async def callback(self, interaction: discord.Interaction):
-            """
-            When a loot pool is selected, build and display the corresponding embed.
-            """
             embed = await self.cog.build_loot_embed(self.values[0])
             await interaction.response.edit_message(embed=embed, view=self.view)
 
 
     class LootPoolView(discord.ui.View):
-        """
-        View containing the LootPoolSelect select menu.
-        """
-
         def __init__(self, cog: "Pools"):
             super().__init__()
             self.add_item(Pools.LootPoolSelect(cog))
@@ -177,28 +144,13 @@ class Pools(commands.Cog):
     @app_commands.command(name="lootpool", description="View the current loot pool for lootrun camps")
     @rate_limit_check()
     async def lootpool(self, interaction: discord.Interaction):
-        """
-        Slash command to display loot pool overview with interactive select menu.
-        """
         embed = await self.build_loot_embed()
         view = self.LootPoolView(self)
         await interaction.response.send_message(embed=embed, view=view)
 
 
-
-    # === Aspect Pool Section ===
-
     async def build_aspect_embed(self, raid_key: str | None = None) -> discord.Embed | ErrorEmbed:
-        """
-        Builds an embed showing aspect pool information.
-
-        If raid_key is None, show overview of all aspect pools.
-        Otherwise, show detailed mythic/fabled/legendary aspects for the selected raid.
-        """
-        # Fetch aspect pool data with CSRF token support
         data = await request_with_csrf(self.TOKEN_URL, self.ASPECTPOOL_URL)
-
-        # Overview embed for all aspect pools
         if raid_key is None:
             embed = discord.Embed(
                 title="Aspect Pool Overview",
@@ -218,7 +170,6 @@ class Pools(commands.Cog):
             embed.set_thumbnail(url=self.ASPECT_ICON_URL)
             return embed
 
-        # Detailed embed for specific aspect pool key
         pool_key = self.ASPECT_POOL_API_MAP[raid_key]
         raid_data = data["Loot"].get(pool_key)
         if not raid_data:
@@ -229,7 +180,6 @@ class Pools(commands.Cog):
             color=discord.Colour.from_rgb(255, 71, 77)
         )
 
-        # Add fields for each rarity type with formatted items
         for rarity in ("Mythic", "Fabled", "Legendary"):
             items = raid_data.get(rarity, [])
             field = ""
@@ -243,10 +193,6 @@ class Pools(commands.Cog):
 
 
     class AspectPoolSelect(discord.ui.Select):
-        """
-        Select menu for choosing an aspect pool.
-        """
-
         def __init__(self, cog: "Pools"):
             self.cog = cog
             options = [
@@ -256,17 +202,11 @@ class Pools(commands.Cog):
             super().__init__(placeholder="Choose an aspect pool...", options=options)
 
         async def callback(self, interaction: discord.Interaction):
-            """
-            When an aspect pool is selected, build and display the corresponding embed.
-            """
             embed = await self.cog.build_aspect_embed(self.values[0])
             await interaction.response.edit_message(embed=embed, view=self.view)
 
 
     class AspectPoolView(discord.ui.View):
-        """
-        View containing the AspectPoolSelect select menu.
-        """
         def __init__(self, cog: "Pools"):
             super().__init__()
             self.add_item(Pools.AspectPoolSelect(cog))
@@ -275,15 +215,9 @@ class Pools(commands.Cog):
     @app_commands.command(name="aspectpool", description="View current aspect pool for raids")
     @rate_limit_check()
     async def aspectpool(self, interaction: discord.Interaction):
-        """
-        Slash command to display aspect pool overview with interactive select menu.
-        """
         embed = await self.build_aspect_embed()
         view = self.AspectPoolView(self)
         await interaction.response.send_message(embed=embed, view=view)
 
-
-
-# Cog setup function for bot
 async def setup(bot: commands.Bot):
     await bot.add_cog(Pools(bot))

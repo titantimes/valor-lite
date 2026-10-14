@@ -15,8 +15,6 @@ with open("assets/map_regions.json") as f:
 
 zone_label_to_key = {data["label"].lower(): key for key, data in map_regions.items()}
 
-
-
 class Map(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -28,25 +26,18 @@ class Map(commands.Cog):
             return zone_lower
         return zone_label_to_key.get(zone_lower)
 
-
     def to_full_map_coord(self, x_ingame, y_ingame, map_width, map_height):
-        # This is from the linear mapping crossing the two extreme points on the map.
-        # Ex: x: -2480 to 1650 (x_neg_ingame to x_pos_ingame)
-        # x_canvas = 0 + ((map_width - 1) - 0) / (x_pos_ingame - x_neg_ingame)) * (x_ingame - x_neg_ingame)
         x_canvas = (x_ingame + 2480) * (map_width - 1) / 4130
         y_canvas = (y_ingame + 6578) * (map_height - 1) / 6419
         return x_canvas, y_canvas
 
-
     def draw_text_with_outline(self, draw, position, text, font, fill, outline_color=(0, 0, 0), outline_width=1):
         x, y = position
-        y_pad = -2  # Adjust vertical position for alignment
-        # Draw outline by drawing text shifted in all surrounding pixels except center
+        y_pad = -2
         for dx in range(-outline_width, outline_width + 1):
             for dy in range(-outline_width, outline_width + 1):
                 if dx != 0 or dy != 0:
                     draw.text((x + dx, y + dy + y_pad), text, font=font, fill=outline_color)
-        # Draw main text on top
         draw.text((x, y + y_pad), text, font=font, fill=fill)
 
     def hex_to_rgb(self, hex_color, fallback=(136, 136, 136)):
@@ -57,7 +48,6 @@ class Map(commands.Cog):
             elif len(hex_color) == 3:
                 return tuple(int(hex_color[i]*2, 16) for i in range(3))
             elif len(hex_color) < 6:
-                # Pad short hex with zeros for safety
                 padded = (hex_color + "0"*6)[:6]
                 return tuple(int(padded[i:i+2], 16) for i in (0, 2, 4))
         except Exception:
@@ -71,10 +61,7 @@ class Map(commands.Cog):
     async def map(self, interaction: discord.Interaction, guild: str = None, zone: str = None):
         await interaction.response.defer()
 
-        # Normalize guild tags to lowercase for filtering
         guild_tags = [tag.strip().lower() for tag in guild.split(",")] if guild else []
-
-        # Parse and validate zone filter(s) if provided
         zones = [z.strip() for z in zone.split(",")] if zone else []
         if zones:
             normalized_zones = []
@@ -144,8 +131,8 @@ class Map(commands.Cog):
         draw_territory = ImageDraw.Draw(terr_layer)
         draw_label = ImageDraw.Draw(label_layer)
 
-        centers = {}      # Store center coordinates of each territory (for connections)
-        terr_owners = {}  # Store owner prefix for each territory (for filtering connections)
+        centers = {}      #for conns
+        terr_owners = {}  #for filtering conns
 
         def extract_coords(loc: dict):
             if not isinstance(loc, dict):
@@ -321,8 +308,6 @@ class Map(commands.Cog):
                 ))
 
         return autocomplete
-
-
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Map(bot))

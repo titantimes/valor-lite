@@ -67,23 +67,8 @@ class Leaderboard(commands.GroupCog, name="leaderboard"):
 
 
     async def display_leaderboard(self, interaction: discord.Interaction, category: str, statistic: str):
-        """
-        Core function to fetch and display leaderboard data for a given category and statistic.
-
-        Args:
-            interaction (discord.Interaction): The command interaction context.
-            category (str): One of 'dungeons', 'raids', 'professions', or 'player_stats'.
-            statistic (str): The statistic name or code to display.
-
-        Workflow:
-        - Validate and normalize statistic name/code.
-        - Query the database with appropriate SQL, handling special cases for combined stats (e.g. raids, dungeons).
-        - Prepare and sort the result list.
-        - Build and send a paginated leaderboard embed or image board.
-        """
         await interaction.response.defer()
 
-        # Normalize statistic from display name to stat code if needed
         if statistic in STATS[category]["names"]:
             stat_index = STATS[category]["names"].index(statistic)
             statistic = STATS[category]["stats"][stat_index]
@@ -93,7 +78,6 @@ class Leaderboard(commands.GroupCog, name="leaderboard"):
             return await interaction.followup.send(embed=ErrorEmbed("Invalid statistic"))
 
         try:
-            # Handle combined raid stat by summing several columns
             if statistic == "raids":
                 res = await Database.fetch(
                     "SELECT uuid_name.name, uuid_name.uuid, "
@@ -102,7 +86,6 @@ class Leaderboard(commands.GroupCog, name="leaderboard"):
                     "FROM player_stats LEFT JOIN uuid_name ON uuid_name.uuid=player_stats.uuid "
                     "ORDER BY total DESC LIMIT 50"
                 )
-            # Handle combined dungeon stat via a large summed query
             elif statistic == "dungeons":
                 res = await Database.fetch(
                     "SELECT uuid_name.name, uuid_name.uuid, "
@@ -120,21 +103,15 @@ class Leaderboard(commands.GroupCog, name="leaderboard"):
                     "ORDER BY total DESC LIMIT 50"
                 )
             else:
-                # Simple stat query for individual stats
                 res = await Database.fetch(
                     f"SELECT uuid_name.name, uuid_name.uuid, player_stats.{statistic} as total "
                     f"FROM player_stats LEFT JOIN uuid_name ON uuid_name.uuid=player_stats.uuid "
                     f"ORDER BY {statistic} DESC LIMIT 50"
                 )
-            # Prepare results: fallback to UUID lookup if name is None
             stats = [(m["name"] or await get_name_from_uuid(m["uuid"]), m["total"]) for m in res]
         except Exception as e:
             return await interaction.followup.send(f"Error retrieving leaderboard: {e}", ephemeral=True)
-
-        # Create a BoardView for the leaderboard, which supports pagination and formatting
         view = BoardView(interaction.user.id, stats, title=f"Leaderboard for {STATS[category]['names'][stat_index]}")
-
-        # Use fancy image-based board based on user preferences, otherwise fallback to embed text table
         if view.is_fancy:
             board = await build_board(view.data, view.page)
             await interaction.followup.send(view=view, file=board)
@@ -143,7 +120,6 @@ class Leaderboard(commands.GroupCog, name="leaderboard"):
             end = start + 10
             sliced = view.data[start:end]
 
-            # Add rank numbering for display
             for i in range(len(sliced)):
                 sliced[i] = [f"{i+start+1}.", sliced[i][0], sliced[i][1]]
 
@@ -169,12 +145,10 @@ class Leaderboard(commands.GroupCog, name="leaderboard"):
     @app_commands.describe(stat="Choose a raid to see its leaderboard")
     @rate_limit_check()
     async def leaderboard_raids(self, interaction: discord.Interaction, stat: str):
-        """Show raid leaderboard for a chosen raid stat."""
         await self.display_leaderboard(interaction, "raids", stat)
 
     @leaderboard_raids.autocomplete("stat")
     async def raids_autocomplete(self, interaction: discord.Interaction, current: str):
-        """Autocomplete raid stat names."""
         return [discord.app_commands.Choice(name=name, value=name) for name in STATS["raids"]["names"] if current.lower() in name.lower()]
 
 
@@ -182,12 +156,10 @@ class Leaderboard(commands.GroupCog, name="leaderboard"):
     @app_commands.describe(stat="Choose a profession to see its leaderboard")
     @rate_limit_check()
     async def leaderboard_professions(self, interaction: discord.Interaction, stat: str):
-        """Show profession leaderboard for a chosen profession stat."""
         await self.display_leaderboard(interaction, "professions", stat)
 
     @leaderboard_professions.autocomplete("stat")
     async def professions_autocomplete(self, interaction: discord.Interaction, current: str):
-        """Autocomplete profession stat names."""
         return [discord.app_commands.Choice(name=name, value=name) for name in STATS["professions"]["names"] if current.lower() in name.lower()]
 
 
@@ -195,40 +167,29 @@ class Leaderboard(commands.GroupCog, name="leaderboard"):
     @app_commands.describe(stat="Choose a player stat to see its leaderboard")
     @rate_limit_check()
     async def leaderboard_misc(self, interaction: discord.Interaction, stat: str):
-        """Show leaderboard for general player stats."""
         await self.display_leaderboard(interaction, "player_stats", stat)
 
     @leaderboard_misc.autocomplete("stat")
     async def misc_autocomplete(self, interaction: discord.Interaction, current: str):
-        """Autocomplete player stat names."""
         return [discord.app_commands.Choice(name=name, value=name) for name in STATS["player_stats"]["names"] if current.lower() in name.lower()]
 
 
     @app_commands.command(name="season_rating", description="Guild Season rating leaderboard")
     @rate_limit_check()
     async def season_ratings(self, interaction: discord.Interaction):
-        """
-        Fetch and display the guild season rating leaderboard.
-
-        Defaults to the current season if no season number is provided.
-        Validates season number and fetches JSON data from an external API.
-        Displays sorted guild ratings in a paginated leaderboard.
-        """
         await interaction.response.defer()
 
         season = await get_current_season()
         if not season:
             return await interaction.followup.send(embed=ErrorEmbed("Could not determine the current season."))
 
-        season_num = season[6:]  # Strip prefix to get season number (like "season26" -> "26")
+        season_num = season[6:]
 
-        # Fetch data from SR API
         res = await request("https://nori.fish/api/database/guild")
         if not res:
             return await interaction.followup.send(embed=ErrorEmbed("Could not fetch season rating data."))
 
         ratings = []
-        # Convert to list of (guild_name, rating) and sort descending by rating
         for guild, data in res.items():
             ratings.append({
                 "guild": data.get("name", "Unknown Guild"),
@@ -237,10 +198,7 @@ class Leaderboard(commands.GroupCog, name="leaderboard"):
 
         ratings.sort(key=lambda x: x["rating"], reverse=True)
 
-        #format rows and use , to separate thousands for better readability
         rows = [(r["guild"], f"{r['rating']:,}") for r in ratings]
-
-        # Create a guild leaderboard BoardView with headers
         view = BoardView(
             interaction.user.id,
             rows,
@@ -249,7 +207,6 @@ class Leaderboard(commands.GroupCog, name="leaderboard"):
             headers=["Guild", "Rating"]
         )
 
-        # Use fancy image board based on user preferences or fallback to text embed table
         if view.is_fancy:
             board = await build_board(view.data, view.page, is_guild_board=True)
             await interaction.followup.send(view=view, file=board)
@@ -268,7 +225,6 @@ class Leaderboard(commands.GroupCog, name="leaderboard"):
                 color=0x333333
             )
             await interaction.followup.send(embed=embed, view=view)
-
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Leaderboard(bot))
