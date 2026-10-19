@@ -71,9 +71,8 @@ class Coolness(commands.Cog):
             )
 
         if not range:
-            return await interaction.response.send_message(
-                embed=ErrorEmbed("Invalid range input"),
-                ephemeral=True
+            return await interaction.followup.send(
+                embed=ErrorEmbed("Invalid range input")
             )
         
         start_ts, end_ts = range

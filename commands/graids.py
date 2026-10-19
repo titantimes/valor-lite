@@ -62,7 +62,7 @@ class GRaids(commands.Cog):
             )
 
             if not res:
-                return await interaction.response.send_message(embed=ErrorEmbed(f"No UUIDs found for: {players}"), ephemeral=True)
+                return await interaction.followup.send(embed=ErrorEmbed(f"No UUIDs found for: {players}"))
 
             uuidtoname = {}
             uuids = []
@@ -72,7 +72,7 @@ class GRaids(commands.Cog):
                 uuids.append(entry["uuid"])
 
             if not uuids:
-                return await interaction.response.send_message(embed=ErrorEmbed("No valid UUIDs provided."), ephemeral=True)
+                return await interaction.followup.send(embed=ErrorEmbed("No valid UUIDs provided."))
 
             template_query = '''
 SELECT ROW_NUMBER() OVER(ORDER BY raid_cnt DESC) AS `raid_cnt`, name, guild, raid_cnt
