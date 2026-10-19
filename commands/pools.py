@@ -44,7 +44,7 @@ class Pools(commands.Cog):
         "tna": "TNA",
         "tcc": "TCC",
         "nol": "NOL",
-        "notg": "NOTG",
+        "notg": "NOG",
         "twp": "TWP"
     }
 
