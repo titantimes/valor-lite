@@ -40,6 +40,26 @@ class Map(commands.Cog):
                     draw.text((x + dx, y + dy + y_pad), text, font=font, fill=outline_color)
         draw.text((x, y + y_pad), text, font=font, fill=fill)
 
+    def crown(self, draw, bounds):
+        left, top, right, bottom = bounds
+        width = min(32, (right - left) * 0.45, (bottom - top) * 0.4)
+        height = width * 0.65
+        if width < 3:
+            return 0
+        crown_left = (left + right - width) / 2
+        crown_top = top + (bottom - top) * 0.12
+        points = [
+            (0, 0.15), (0.25, 0.45), (0.5, 0), (0.75, 0.45),
+            (1, 0.15), (0.85, 1), (0.15, 1),
+        ]
+        draw.polygon(
+            [(crown_left + horizontal * width, crown_top + vertical * height)
+             for horizontal, vertical in points],
+            fill=(255, 211, 64, 255), outline=(0, 0, 0, 255),
+            width=max(1, round(width / 16)),
+        )
+        return height
+
     def hex_to_rgb(self, hex_color, fallback=(136, 136, 136)):
         try:
             hex_color = hex_color.lstrip('#')
@@ -80,7 +100,9 @@ class Map(commands.Cog):
             zones = normalized_zones
 
         try:
-            terr_res = await request("https://athena.wynntils.com/cache/get/territoryList")
+            terr_res = await request("https://api.wynncraft.com/v3/guild/list/territory")
+            if not isinstance(terr_res, dict) or not terr_res:
+                terr_res = await request("https://athena.wynntils.com/cache/get/territoryList")
             guilds_res = await request("https://athena.wynntils.com/cache/get/guildList")
             guild_color_lookup = {}
             if isinstance(guilds_res, list):
@@ -96,7 +118,7 @@ class Map(commands.Cog):
                     except Exception:
                         continue
         except Exception:
-            return await interaction.followup.send("Athena is down.", ephemeral=True)
+            return await interaction.followup.send("Map data is currently unavailable.", ephemeral=True)
 
         territories = None
         if isinstance(terr_res, dict):
@@ -114,8 +136,8 @@ class Map(commands.Cog):
                     break
 
         if not territories or not isinstance(territories, dict):
-            logging.error("Unexpected territory response from Athena: %s", terr_res)
-            return await interaction.followup.send("Athena returned unexpected territory data.", ephemeral=True)
+            logging.error("Unexpected map territory response: %s", terr_res)
+            return await interaction.followup.send("Territory data is currently unavailable.", ephemeral=True)
 
         with open("assets/terr_conns.json") as f:
             terr_conns = json.load(f)
@@ -227,7 +249,10 @@ class Map(commands.Cog):
 
             bbox = draw_label.textbbox((0, 0), prefix or "None", font=font)
             tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-            self.draw_text_with_outline(draw_label, (cx - tw/2, cy - th/2), prefix or "None", font, fill=border)
+            crown_height = 0
+            if data.get("hq") is True:
+                crown_height = self.crown(draw_label, (left, top, right, bottom))
+            self.draw_text_with_outline(draw_label, (cx - tw/2, cy - th/2 + crown_height/2), prefix or "None", font, fill=border)
 
         for start, targets in terr_conns.items():
             center_start = centers.get(start)
