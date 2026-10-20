@@ -46,15 +46,15 @@ class Map(commands.Cog):
         height = width * 0.65
         if width < 3:
             return 0
-        crown_left = (left + right - width) / 2
-        crown_top = top + (bottom - top) * 0.12
+        cleft = (left + right - width) / 2
+        ctop = top + (bottom - top) * 0.12
         points = [
-            (0, 0.15), (0.25, 0.45), (0.5, 0), (0.75, 0.45),
+            (0, 0.15), (0.25, 0.45), (0.5, 0), (0.65, 0.45),
             (1, 0.15), (0.85, 1), (0.15, 1),
         ]
         draw.polygon(
-            [(crown_left + horizontal * width, crown_top + vertical * height)
-             for horizontal, vertical in points],
+            [(cleft + horizontal * width, ctop + vertical * height)
+                for horizontal, vertical in points],
             fill=(255, 211, 64, 255), outline=(0, 0, 0, 255),
             width=max(1, round(width / 16)),
         )
