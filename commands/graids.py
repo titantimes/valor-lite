@@ -20,7 +20,7 @@ class GRaids(commands.Cog):
     @app_commands.command(name="graids", description="Leaderboard for guild raid counts")
     @app_commands.describe(
         guilds="Filter by guild tags (comma-separated)",
-        range="Number of days ago, or a range like '0,7', or season name like 'season26'",
+        range="Number of days ago, a range like '0,7', Unix timestamp(s), or a season name",
         players="Filter by player usernames (comma-separated)",
         guild_wise="Show raid totals per guild instead of individual players"
     )
@@ -29,7 +29,7 @@ class GRaids(commands.Cog):
         self,
         interaction: discord.Interaction,
         guilds: str = None,
-        range: str = "7",
+        range: str = None,
         players: str = None,
         guild_wise: bool = False
     ):
@@ -39,15 +39,18 @@ class GRaids(commands.Cog):
         if guilds and players:
             return await interaction.followup.send(embed=ErrorEmbed("You cannot use `players` and `guilds` together."))
 
-        range = await get_range_from_string(range, max_allowed_range=None)
-
-        if not range:
-            return await interaction.followup.send(embed=ErrorEmbed("Invalid range input"))
-
-        prepared_params = [range[0], range[1]]
+        if range:
+            range = await get_range_from_string(range, max_allowed_range=None)
+            if not range:
+                return await interaction.followup.send(embed=ErrorEmbed("Invalid range input"))
+            time_clause = "A.`time` > %s AND A.`time` <= %s"
+            prepared_params = [range[0], range[1]]
+        else:
+            time_clause = "1=1"
+            prepared_params = []
 
         template_query_params = {
-            "TIME_CLAUSE": "A.`time` > %s AND A.`time` <= %s",
+            "TIME_CLAUSE": time_clause,
             "GUILD_CLAUSE": "",
             "UUIDS": ""
         }

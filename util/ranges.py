@@ -43,17 +43,23 @@ async def get_range_from_string(range_input: str, max_allowed_range: int = 50) -
         try:
             parts = [p.strip() for p in range_input.split(',') if p.strip()]
 
-            if len(parts) == 1:
-                left_days = float(parts[0])
-                right_days = 0.0
-            elif len(parts) == 2:
-                right_days = float(parts[0])
-                left_days = float(parts[1])
-            else:
+            if len(parts) not in (1, 2):
                 return None
 
-            left = now - left_days * 86400
-            right = now - right_days * 86400
+            values = [float(part) for part in parts]
+            if any(abs(value) > 9999 for value in values):
+                left = values[0]
+                right = values[1] if len(values) == 2 else now
+            elif len(values) == 1:
+                left_days = values[0]
+                right_days = 0.0
+                left = now - left_days * 86400
+                right = now
+            else:
+                right_days = values[0]
+                left_days = values[1]
+                left = now - left_days * 86400
+                right = now - right_days * 86400
         except ValueError:
             return None
 
