@@ -1,4 +1,4 @@
-import discord, json, logging, io
+import asyncio, discord, json, logging, io, shlex
 
 from discord import app_commands
 from discord.ext import commands
@@ -18,6 +18,7 @@ zone_label_to_key = {data["label"].lower(): key for key, data in map_regions.ite
 class Map(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.render_lock = asyncio.Lock()
 
 
     def normalize_zone(self, zone_input: str) -> str | None:
@@ -81,6 +82,83 @@ class Map(commands.Cog):
     async def map(self, interaction: discord.Interaction, guild: str = None, zone: str = None):
         await interaction.response.defer()
 
+        async with self.render_lock:
+            image, error = await self._render_map(guild, zone)
+
+        if error:
+            return await interaction.followup.send(embed=ErrorEmbed(error), ephemeral=True)
+
+        try:
+            await interaction.followup.send(file=discord.File(fp=image, filename="map.png"))
+        finally:
+            image.close()
+
+
+    @commands.command(name="map", aliases=["m"])
+    @commands.cooldown(1, 15, commands.BucketType.user)
+    async def prefixmap(self, ctx: commands.Context, *, options: str = ""):
+        try:
+            tokens = shlex.split(options)
+            guild_tags = []
+            zones = []
+            index = 0
+
+            while index < len(tokens):
+                option = tokens[index].lower()
+                if option in {"-g", "--guild"}:
+                    index += 1
+                    found_value = False
+                    while index < len(tokens) and not tokens[index].startswith("-"):
+                        guild_tags.extend(tag for tag in tokens[index].split(",") if tag)
+                        found_value = True
+                        index += 1
+                    if not found_value:
+                        raise ValueError("Provide one or more guild tags after `-g`.")
+                elif option in {"-z", "--zone"}:
+                    index += 1
+                    if index >= len(tokens) or tokens[index].startswith("-"):
+                        raise ValueError("Provide one or more zones after `-z`.")
+                    zones.extend(zone.strip() for zone in tokens[index].split(",") if zone.strip())
+                    index += 1
+                else:
+                    raise ValueError(f"Unrecognized option: `{tokens[index]}`.")
+
+            guild = ",".join(guild_tags) or None
+            zone = ",".join(zones) or None
+        except ValueError as error:
+            return await ctx.send(embed=ErrorEmbed(
+                f"{error}\nUsage: `-map [-g TAG [TAG ...]] [-z ZONE[,ZONE...]]`"
+            ))
+
+        async with self.render_lock:
+            image, error = await self._render_map(guild, zone)
+
+        if error:
+            return await ctx.send(embed=ErrorEmbed(error))
+
+        try:
+            await ctx.send(file=discord.File(fp=image, filename="map.png"))
+        finally:
+            image.close()
+
+
+    @prefixmap.error
+    async def prefixmap_e(self, ctx: commands.Context, error: commands.CommandError):
+        if isinstance(error, commands.CommandOnCooldown):
+            return await ctx.send(embed=ErrorEmbed(
+                f"Try again in {error.retry_after:.1f} seconds."
+            ))
+
+        logging.error(
+            "Prefix map failed: %s",
+            error,
+            exc_info=(type(error), error, error.__traceback__)
+        )
+        await ctx.send(embed=ErrorEmbed("Map generation failed. Please try again later."))
+
+
+    async def _render_map(self, guild: str = None, zone: str = None):
+
         guild_tags = [tag.strip().lower() for tag in guild.split(",")] if guild else []
         zones = [z.strip() for z in zone.split(",")] if zone else []
         if zones:
@@ -95,7 +173,7 @@ class Map(commands.Cog):
                     invalid_zones.append(z)
             
             if invalid_zones:
-                return await interaction.followup.send(f"Invalid zone(s): {', '.join(invalid_zones)}", ephemeral=True)
+                return None, f"Invalid zone(s): {', '.join(invalid_zones)}"
             
             zones = normalized_zones
 
@@ -118,7 +196,7 @@ class Map(commands.Cog):
                     except Exception:
                         continue
         except Exception:
-            return await interaction.followup.send("Map data is currently unavailable.", ephemeral=True)
+            return None, "Map data is currently unavailable."
 
         territories = None
         if isinstance(terr_res, dict):
@@ -137,7 +215,7 @@ class Map(commands.Cog):
 
         if not territories or not isinstance(territories, dict):
             logging.error("Unexpected map territory response: %s", terr_res)
-            return await interaction.followup.send("Territory data is currently unavailable.", ephemeral=True)
+            return None, "Territory data is currently unavailable."
 
         with open("assets/terr_conns.json") as f:
             terr_conns = json.load(f)
@@ -276,10 +354,7 @@ class Map(commands.Cog):
                 final = final.crop((min_x - 50, min_y - 50, max_x + 50, max_y + 50))
             else:
                 plural = "s are" if len(guild_tags) > 1 else " is"
-                return await interaction.followup.send(embed=ErrorEmbed(
-                        f"Specified guild{plural} not currently on the map."
-                    )
-                )
+                return None, f"Specified guild{plural} not currently on the map."
 
         if zones:
             crop_min_x, crop_min_y = float("inf"), float("inf")
@@ -298,10 +373,10 @@ class Map(commands.Cog):
             final = final.crop((crop_min_x - 50, crop_min_y - 50, crop_max_x + 50, crop_max_y + 50))
 
         
-        with io.BytesIO() as img_binary:
-            final.save(img_binary, 'PNG')
-            img_binary.seek(0)
-            await interaction.followup.send(file=discord.File(fp=img_binary, filename="map.png"))
+        img_binary = io.BytesIO()
+        final.save(img_binary, 'PNG')
+        img_binary.seek(0)
+        return img_binary, None
 
 
     @map.autocomplete("zone")
