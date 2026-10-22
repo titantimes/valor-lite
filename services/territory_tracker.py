@@ -9,6 +9,39 @@ from util.mappings import FFA_TERRITORIES
 
 WYNN_API_URL = "https://api.wynncraft.com/v3/guild/list/territory"
 ATHENA_API_URL = "https://athena.wynntils.com/cache/get/territoryList"
+OURS = {
+    "Nodguj Nation",
+    "Jofash Tunnel",
+    "Maro Peaks",
+    "Volcanic Isles",
+    "Dreary Docks",
+    "Pirate Town",
+    "Aldorei Valley Outskirts",
+    "Lost Atoll",
+    "Regular Island",
+    "Dujgon Nation",
+    "Half Moon Island",
+    "Rooster Island",
+    "Derelict Mansion",
+    "Disturbed Crypt",
+    "Jofash Docks",
+    "Icy Island",
+    "Skien's Island",
+    "Tree Island",
+    "Durum Oat Islet",
+    "Zhight Island",
+    "The Shiar",
+    "Durum Isles Barn",
+    "Lifeless Forest",
+    "Mage Island",
+    "Durum Barley Islet",
+    "Selchar",
+    "Luxuriant Pond",
+    "Bear Zoo",
+    "Durum Malt Islet",
+    "Light Peninsula",
+    "Santa's Hideout",
+}
 
 
 
@@ -67,10 +100,14 @@ def fetch_territory_data() -> dict:
     return {}
 
 
-def create_terrchange_embed(old_territory, new_territory, for_ano: bool = False):
+def ours_q(territory):
+    return territory.get("guild") == "Titans Valor" or territory.get("guildPrefix") == "ANO"
+
+
+def create_terrchange_embed(old_territory, new_territory, for_ano: bool = False, highlight_red: bool = False):
     embed = discord.Embed(
         title=f"Territory Captured: {new_territory['territory']}", 
-        color=0x007bff  
+        color=0xE53935 if highlight_red else 0x007bff
     )
     embed.add_field(name="Previous Owner", value=f"{old_territory['guild']} ({old_territory['guildPrefix']})", inline=True)
     embed.add_field(name="New Owner", value=f"{new_territory['guild']} ({new_territory['guildPrefix']})", inline=True)
@@ -127,7 +164,12 @@ class TerritoryTrackerService(commands.Cog):
                 old = self.territory_data[territory["territory"]]
                 try:
                     for_ano = territory.get("guildPrefix") == "ANO" or old.get("guildPrefix") == "ANO"
-                    embed = create_terrchange_embed(old, territory, for_ano)
+                    reclaimt = (
+                        territory["territory"] in OURS
+                        and ours_q(old)
+                        and not ours_q(territory)
+                    )
+                    embed = create_terrchange_embed(old, territory, for_ano, reclaimt)
                     if for_ano and ano_channel:
                         await ano_channel.send(embed=embed)
                     if channel:
