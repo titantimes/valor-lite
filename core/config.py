@@ -34,5 +34,6 @@ class Config:
     TITAN_CHAT_CHANNEL_ID = json.loads(os.getenv("TITAN_CHAT_CHANNEL_ID"))
     TERRITORY_TRACKER_CHANNEL_ID = json.loads(os.getenv("TERRITORY_TRACKER_CHANNEL_ID"))
     ANO_TERRITORY_TRACKER_CHANNEL_ID = json.loads(os.getenv("ANO_TERRITORY_TRACKER_CHANNEL_ID"))
+    ANO_RECLAIM_ALERT_ROLE_ID = int(os.getenv("ANO_RECLAIM_ALERT_ROLE_ID", 0))
 
 config = Config()

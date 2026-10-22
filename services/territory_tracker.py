@@ -126,6 +126,11 @@ class TerritoryTrackerService(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.territory_data = fetch_territory_data()
+        self.reclaimused = any(
+            territory in self.territory_data and not ours_q(self.territory_data[territory])
+            for territory in OURS
+        )
+        self.ownedsince = None
         self.terryitory_tracker_loop.start()
 
 
@@ -147,8 +152,25 @@ class TerritoryTrackerService(commands.Cog):
             logging.warning("Territory Tracker: no data fetched, keeping previous snapshot")
             return
 
+        all_reclaim_targets_owned = all(
+            territory in updated_data and ours_q(updated_data[territory])
+            for territory in OURS
+        )
+        if not all_reclaim_targets_owned:
+            self.ownedsince = None
+        elif self.reclaimused:
+            if self.ownedsince is None:
+                self.ownedsince = asyncio.get_running_loop().time()
+            elif asyncio.get_running_loop().time() - self.ownedsince > 1800:
+                self.reclaimused = False
+                self.ownedsince = None
+
         if not self.territory_data:
             self.territory_data = updated_data
+            self.reclaimused = any(
+                territory in updated_data and not ours_q(updated_data[territory])
+                for territory in OURS
+            )
             return
 
         changed_territories = []
@@ -164,15 +186,26 @@ class TerritoryTrackerService(commands.Cog):
                 old = self.territory_data[territory["territory"]]
                 try:
                     for_ano = territory.get("guildPrefix") == "ANO" or old.get("guildPrefix") == "ANO"
-                    reclaimt = (
+                    reclaim_loss = (
                         territory["territory"] in OURS
                         and ours_q(old)
                         and not ours_q(territory)
                     )
-                    embed = create_terrchange_embed(old, territory, for_ano, reclaimt)
-                    if for_ano and ano_channel:
+                    embed = create_terrchange_embed(old, territory, for_ano, reclaim_loss)
+                    ping_role = reclaim_loss and not self.reclaimused and Config.ANO_RECLAIM_ALERT_ROLE_ID
+                    alert_channel = ano_channel or channel
+                    alert_sent = False
+                    if ping_role and alert_channel:
+                        await alert_channel.send(
+                            content=f"<@&{Config.ANO_RECLAIM_ALERT_ROLE_ID}>",
+                            embed=embed,
+                            allowed_mentions=discord.AllowedMentions(roles=True),
+                        )
+                        self.reclaimused = True
+                        alert_sent = True
+                    if for_ano and ano_channel and not (alert_sent and alert_channel is ano_channel):
                         await ano_channel.send(embed=embed)
-                    if channel:
+                    if channel and not (alert_sent and alert_channel is channel):
                         await channel.send(embed=embed)
                 except Exception:
                     logging.exception(f"Territory Tracker: failed to post change for {territory.get('territory')}")
