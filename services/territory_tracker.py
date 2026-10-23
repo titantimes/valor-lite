@@ -179,6 +179,9 @@ class TerritoryTrackerService(commands.Cog):
             if old is not None and old.get("guild") != info.get("guild"):
                 changed_territories.append(info)
 
+
+            #Turn this into a system where we can store what guilds deem as "their pingable territories" or "their reclaim ones"
+            #and store that in the backend we could make this distributable, kinda fine to implement will just need forced refreshes and stuff i guess
         if changed_territories:
             channel = self.bot.get_channel(Config.TERRITORY_TRACKER_CHANNEL_ID)
             ano_channel = self.bot.get_channel(Config.ANO_TERRITORY_TRACKER_CHANNEL_ID)
