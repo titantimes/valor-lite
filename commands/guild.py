@@ -64,6 +64,94 @@ async def get_online(data):
     return description
 
 
+def m_section(data):
+    sections = {}
+    for rank, players in data["members"].items():
+        if rank == "total":
+            continue
+
+        rows = []
+        for name, details in players.items():
+            joined = datetime.datetime.fromisoformat(details["joined"][:-1]).strftime("%m/%d/%Y")
+            rows.append([name, joined])
+
+        sections[f"{rank.capitalize()} ({len(rows)})"] = rows
+
+    return sections
+
+
+def gxps(data):
+    rows = [
+        (player, player_data["contributed"])
+        for rank, players in data["members"].items()
+        if rank != "total"
+        for player, player_data in players.items()
+    ]
+    rows.sort(key=lambda row: row[1], reverse=True)
+    return [[player, f"{contributed:,} "] for player, contributed in rows]
+
+
+class GuildOverviewView(discord.ui.View):
+    def __init__(self, overview_embed, data):
+        super().__init__(timeout=120)
+        self.overview_embed = overview_embed
+        self.member_pages = PaginatedFieldedTextTableEmbed(
+            ["Name", "Joined"],
+            m_section(data),
+            title=f"{data['name']}: Members",
+            color=discord.Color.blue(),
+            rows_per_page=20,
+        )
+        self.gxp_pages = PaginatedTextTableEmbed(
+            ["Name", "XP"],
+            gxps(data),
+            title=f"{data['name']}: GXP Contributions",
+            color=discord.Color.blue(),
+            rows_per_page=20,
+        )
+        self.member_page_count = max(self.member_pages.total_pages, 1)
+        self.gxp_page_count = max(self.gxp_pages.total_pages, 1)
+        self.total_pages = 1 + self.member_page_count + self.gxp_page_count
+        self.page = 0
+
+        self.previous_button = discord.ui.Button(
+            emoji="⬅️", style=discord.ButtonStyle.gray, disabled=True
+        )
+        self.previous_button.callback = self.back
+        self.next_button = discord.ui.Button(emoji="➡️", style=discord.ButtonStyle.gray)
+        self.next_button.callback = self.forward
+        self.add_item(self.previous_button)
+        self.add_item(self.next_button)
+
+    def format(self, page):
+        if page == 0:
+            embed = self.overview_embed.copy()
+            section = "Overview"
+        elif page <= self.member_page_count:
+            embed = self.member_pages.format_page(page - 1)
+            section = "Members"
+        else:
+            embed = self.gxp_pages.format_page(page - 1 - self.member_page_count)
+            section = "GXP Contributions"
+
+        embed.set_footer(text=f"{section} | Page {page + 1}/{self.total_pages}")
+        return embed
+
+    async def cpag(self, interaction, page):
+        self.page = page
+        self.previous_button.disabled = page == 0
+        self.next_button.disabled = page == self.total_pages - 1
+        await interaction.response.edit_message(embed=self.format(page), view=self)
+
+    async def back(self, interaction):
+        if self.page > 0:
+            await self.cpag(interaction, self.page - 1)
+
+    async def forward(self, interaction):
+        if self.page < self.total_pages - 1:
+            await self.cpag(interaction, self.page + 1)
+
+
 
 class GuildCommands(commands.GroupCog, name="guild"):
     def __init__(self, bot: commands.Bot):
@@ -97,7 +185,8 @@ Created: {datetime.datetime.fromisoformat(data["created"][:-1]).strftime("%m/%d/
         embed = discord.Embed(title=f"{data['name']}: Overview", description=desc, color=0x7785cc)
         embed.add_field(name=f"Online Members ({data["online"]})", value=online_desc)
 
-        return await interaction.followup.send(embed=embed)
+        view = GuildOverviewView(embed, data)
+        return await interaction.followup.send(embed=view.format(0), view=view)
 
 
     @app_commands.command(name="online", description="View online players of the guild")
@@ -133,24 +222,10 @@ Created: {datetime.datetime.fromisoformat(data["created"][:-1]).strftime("%m/%d/
             return await interaction.followup.send(embed=ErrorEmbed("Default guild name and tag have not been set. Please get an admin to run `/guild_settings` and set it."))
         if not data:
             return await interaction.followup.send(embed=ErrorEmbed("Error fetching guild data"))
-        sections = {}
-
-        for rank, players in data["members"].items():
-            if rank == "total":
-                continue
-
-            rows = []
-            for name, details in players.items():
-                joined = datetime.datetime.fromisoformat(details["joined"][:-1]).strftime("%m/%d/%Y")
-                rows.append([name, joined])
-
-            section_title = f"{rank.capitalize()} ({len(rows)})"
-            sections[section_title] = rows
-
         await PaginatedFieldedTextTableEmbed.send(
             interaction,
             ["Name", "Joined"],
-            sections,
+            m_section(data),
             title=f"{data['name']}: Members",
             color=discord.Color.blue(),
             rows_per_page=20
@@ -169,25 +244,10 @@ Created: {datetime.datetime.fromisoformat(data["created"][:-1]).strftime("%m/%d/
             return await interaction.followup.send(embed=ErrorEmbed("Default guild name and tag have not been set. Please get an admin to run `/guild_settings` and set it."))
         if not data:
             return await interaction.followup.send(embed=ErrorEmbed("Error fetching guild data"))
-        rows = []
-
-        for rank in data["members"]:
-            if rank == "total":
-                continue
-            for player, player_data in data["members"][rank].items():
-                rows.append([player, player_data["contributed"]])
-
-        # Sort by contributed XP descending
-        rows = sorted(rows, key=lambda x: x[1], reverse=True)
-
-        # Format XP numbers with commas
-        for idx, row in enumerate(rows):
-            rows[idx][1] = f"{row[1]:,} "
-
         await PaginatedTextTableEmbed.send(
             interaction,
             ["Name", "XP"],
-            rows,
+            gxps(data),
             title=f"{data['name']}: GXP Contributions",
             color=discord.Color.blue(),
             rows_per_page=20
