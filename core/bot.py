@@ -15,7 +15,7 @@ class ValorBot(commands.Bot):
         intents.messages = True
 
         super().__init__(
-            command_prefix=None, #when ready we do this
+            command_prefix="-", #stops the spam even when its not valid
             intents=intents,
             help_command=None,
             log_handler=None,
