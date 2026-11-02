@@ -58,7 +58,10 @@ class Pools(commands.Cog):
 
 
     async def build_loot_embed(self, pool_key: str | None = None) -> discord.Embed | ErrorEmbed:
-        data = (await request_with_csrf(self.TOKEN_URL, self.LOOTPOOL_URL))["Loot"]
+        response = await request_with_csrf(self.TOKEN_URL, self.LOOTPOOL_URL)
+        if not isinstance(response, dict) or not isinstance(response.get("Loot"), dict) or not response["Loot"]:
+            return ErrorEmbed("Loot pool data is unavailabel")
+        data = response["Loot"]
 
         if pool_key is None:
             embed = discord.Embed(
@@ -151,6 +154,9 @@ class Pools(commands.Cog):
 
     async def build_aspect_embed(self, raid_key: str | None = None) -> discord.Embed | ErrorEmbed:
         data = await request_with_csrf(self.TOKEN_URL, self.ASPECTPOOL_URL)
+        if not isinstance(data, dict) or not isinstance(data.get("Loot"), dict) or not data["Loot"]:
+            return ErrorEmbed("Aspect pool data is temporarily unavailable. Please try again later.")
+
         if raid_key is None:
             embed = discord.Embed(
                 title="Aspect Pool Overview",
