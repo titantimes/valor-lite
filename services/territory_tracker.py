@@ -130,6 +130,12 @@ class TerritoryTrackerService(commands.Cog):
             territory in self.territory_data and not ours_q(self.territory_data[territory])
             for territory in OURS
         )
+        self.reclaim_guilds = {
+            self.territory_data[territory]["guild"]
+            for territory in OURS
+            if territory in self.territory_data and not ours_q(self.territory_data[territory])
+        }
+        self.reclaim_first_alert_at = asyncio.get_running_loop().time() if self.reclaimused else None
         self.ownedsince = None
         self.terryitory_tracker_loop.start()
 
@@ -164,6 +170,8 @@ class TerritoryTrackerService(commands.Cog):
             elif asyncio.get_running_loop().time() - self.ownedsince > 1800:
                 self.reclaimused = False
                 self.ownedsince = None
+                self.reclaim_guilds.clear()
+                self.reclaim_first_alert_at = None
 
         if not self.territory_data:
             self.territory_data = updated_data
@@ -171,6 +179,12 @@ class TerritoryTrackerService(commands.Cog):
                 territory in updated_data and not ours_q(updated_data[territory])
                 for territory in OURS
             )
+            self.reclaim_guilds = {
+                updated_data[territory]["guild"]
+                for territory in OURS
+                if territory in updated_data and not ours_q(updated_data[territory])
+            }
+            self.reclaim_first_alert_at = asyncio.get_running_loop().time() if self.reclaimused else None
             return
 
         changed_territories = []
@@ -193,7 +207,18 @@ class TerritoryTrackerService(commands.Cog):
                         and not ours_q(territory)
                     )
                     embed = create_terrchange_embed(old, territory, for_ano, reclaim_loss)
-                    ping_role = reclaim_loss and not self.reclaimused and Config.ANO_RECLAIM_ALERT_ROLE_ID
+                    new_attacker = territory["guild"] not in self.reclaim_guilds
+                    hour_elapsed = (
+                        self.reclaim_first_alert_at is not None
+                        and asyncio.get_running_loop().time() - self.reclaim_first_alert_at >= 3600
+                    )
+                    ping_role = (
+                        reclaim_loss
+                        and (not self.reclaimused or (new_attacker and hour_elapsed))
+                        and Config.ANO_RECLAIM_ALERT_ROLE_ID
+                    )
+                    if reclaim_loss:
+                        self.reclaim_guilds.add(territory["guild"])
                     alert_channel = ano_channel or channel
                     alert_sent = False
                     if ping_role and alert_channel:
@@ -203,6 +228,8 @@ class TerritoryTrackerService(commands.Cog):
                             allowed_mentions=discord.AllowedMentions(roles=True),
                         )
                         self.reclaimused = True
+                        if self.reclaim_first_alert_at is None:
+                            self.reclaim_first_alert_at = asyncio.get_running_loop().time()
                         alert_sent = True
                     if for_ano and ano_channel and not (alert_sent and alert_channel is ano_channel):
                         await ano_channel.send(embed=embed)
