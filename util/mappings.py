@@ -176,8 +176,8 @@ RANK_SYMBOL_MAP = {
 
 # Maximum level values
 MAX_STATS = {
-    "total": 1690,
-    "combat": 106,
+    "total": 1705,
+    "combat": 121,
     "gathering": 132,
     "crafting": 132
 }
