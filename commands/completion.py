@@ -28,7 +28,15 @@ async def get_colored_percentage(percent: float) -> str:
     else:
         return f"{green}{percent:>7.3%}{stop}"
 
-GATHER_MQ = ("Mini-Quest - Gather")
+def fixapipls(quest: str) -> bool:
+    parts = quest.split("_")
+    return "Mini-Quest - Gather" in quest or (
+        len(parts) >= 4
+        and parts[0] == "miniquest"
+        and parts[1].isdigit()
+        and parts[2] in ("farming", "fishing", "mining", "woodcutting")
+    )
+
 async def show_total_progress(stats: dict, max_characters: int) -> str:
     sections = []  
     total = 0  
@@ -121,15 +129,11 @@ class Completion(commands.Cog):
                     if stat in ["Quests", "Slaying Mini-Quests", "Gathering Mini-Quests"]:
                         quests = char.get("quests", [])
                         if stat == "Quests":
-                            val = sum(1 for q in quests if "Mini-Quest" not in q)
+                            val = sum(1 for q in quests if "Mini-Quest" not in q and not fixapipls(q))
                         elif stat == "Slaying Mini-Quests":
-                            val = sum(1 for q in quests if "Mini-Quest" in q and not any(
-                                prefix in q for prefix in GATHER_MQ
-                            ))
+                            val = sum(1 for q in quests if "Mini-Quest" in q and not fixapipls(q))
                         else:
-                            val = sum(1 for q in quests if any(
-                                prefix in q for prefix in GATHER_MQ
-                            ))
+                            val = sum(1 for q in quests if fixapipls(q))
                     elif stat == "Discoveries":
                         val = char.get("discoveries", 0)
                     elif stat == "World Events":
