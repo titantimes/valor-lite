@@ -56,15 +56,15 @@ async def show_total_progress(stats: dict, max_characters: int) -> str:
     for prof in ["Alchemism", "Armouring", "Cooking", "Jeweling", "Scribing", "Tailoring", "Weaponsmithing", "Woodworking"]:
         sections.append(await section(prof, stats[prof], MAX_STATS["crafting"] * max_characters, purple))
 
-    sections.append(await section("Main Quests", stats["Quests"], 137 * max_characters, green))
-    sections.append(await section("Slaying Mini-Quests", stats["Slaying Mini-Quests"], 29 * max_characters, green))
-    sections.append(await section("Gathering Mini-Quests", stats["Gathering Mini-Quests"], 96 * max_characters, green))
-    sections.append(await section("Discoveries", stats["Discoveries"], (105 + 496) * max_characters, green))
-    sections.append(await section("World Events", stats["World Events"], 54 * max_characters, green))
-    sections.append(await section("Lootruns", stats["Lootruns"], 5 * max_characters, green))
-    sections.append(await section("Caves", stats["Caves"], 172 * max_characters, green))
+    sections.append(await section("Main Quests", stats["Quests"], 158 * max_characters, green))
+    sections.append(await section("Slaying Mini-Quests", stats["Slaying Mini-Quests", "Hunt Mini-Quests"], 35 * max_characters, green))
+    sections.append(await section("Gathering Mini-Quests", stats["Gathering Mini-Quests", "Collect Mini-Quests"], 110 * max_characters, green))
+    sections.append(await section("Discoveries", stats["Discoveries"], (121 + 553) * max_characters, green))
+    sections.append(await section("World Events", stats["World Events"], 70 * max_characters, green))
+    sections.append(await section("Lootruns", stats["Lootruns"], 7 * max_characters, green))
+    sections.append(await section("Caves", stats["Caves"], 198 * max_characters, green))
     sections.append(await section("Unique Dungeons", stats["Unique Dungeon Completions"], 18 * max_characters, green))
-    sections.append(await section("Unique Raids", stats["Unique Raid Completions"], 4 * max_characters, green))
+    sections.append(await section("Unique Raids", stats["Unique Raid Completions"], 5 * max_characters, green))
 
     sections.append(f"{red}{'Overall Total':>24}{stop}  | {total:7,} / {total_max:6,}  | {await get_colored_percentage(total / total_max)}")
 
