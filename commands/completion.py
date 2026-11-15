@@ -28,7 +28,7 @@ async def get_colored_percentage(percent: float) -> str:
     else:
         return f"{green}{percent:>7.3%}{stop}"
 
-GATHER_MQ = ("Mini-Quest - Gather", "Mini-Quest - Collect")
+GATHER_MQ = ("Mini-Quest - Gather")
 async def show_total_progress(stats: dict, max_characters: int) -> str:
     sections = []  
     total = 0  
