@@ -8,8 +8,6 @@ from util.embeds import ErrorEmbed
 from util.requests import request
 from util.mappings import MAX_STATS, SUPPORT_RANK_SLOTS
 
-
-
 async def get_colored_percentage(percent: float) -> str:
     green = "\033[1;32m"
     red = "\033[0;31m"
@@ -30,7 +28,7 @@ async def get_colored_percentage(percent: float) -> str:
     else:
         return f"{green}{percent:>7.3%}{stop}"
 
-
+GATHER_MQ = ("Mini-Quest - Gather", "Mini-Quest - Collect")
 async def show_total_progress(stats: dict, max_characters: int) -> str:
     sections = []  
     total = 0  
@@ -57,8 +55,8 @@ async def show_total_progress(stats: dict, max_characters: int) -> str:
         sections.append(await section(prof, stats[prof], MAX_STATS["crafting"] * max_characters, purple))
 
     sections.append(await section("Main Quests", stats["Quests"], 158 * max_characters, green))
-    sections.append(await section("Slaying Mini-Quests", stats["Slaying Mini-Quests", "Hunt Mini-Quests"], 35 * max_characters, green))
-    sections.append(await section("Gathering Mini-Quests", stats["Gathering Mini-Quests", "Collect Mini-Quests"], 110 * max_characters, green))
+    sections.append(await section("Slaying Mini-Quests", stats["Slaying Mini-Quests"], 35 * max_characters, green))
+    sections.append(await section("Gathering Mini-Quests", stats["Gathering Mini-Quests"], 110 * max_characters, green))
     sections.append(await section("Discoveries", stats["Discoveries"], (121 + 553) * max_characters, green))
     sections.append(await section("World Events", stats["World Events"], 70 * max_characters, green))
     sections.append(await section("Lootruns", stats["Lootruns"], 7 * max_characters, green))
@@ -125,9 +123,13 @@ class Completion(commands.Cog):
                         if stat == "Quests":
                             val = sum(1 for q in quests if "Mini-Quest" not in q)
                         elif stat == "Slaying Mini-Quests":
-                            val = sum(1 for q in quests if "Mini-Quest" in q and "Gather" not in q)
+                            val = sum(1 for q in quests if "Mini-Quest" in q and not any(
+                                prefix in q for prefix in GATHER_MQ
+                            ))
                         else:
-                            val = sum(1 for q in quests if "Mini-Quest - Gather" in q)
+                            val = sum(1 for q in quests if any(
+                                prefix in q for prefix in GATHER_MQ
+                            ))
                     elif stat == "Discoveries":
                         val = char.get("discoveries", 0)
                     elif stat == "World Events":
