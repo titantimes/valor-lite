@@ -49,19 +49,16 @@ STATS = {
     "player_stats": {
         "stats": [
             "chests_found", "items_identified", "logins", "deaths", "blocks_walked", "playtime", "firstjoin",
-            "combat", "mobs_killed"
+            "combat", "mobs_killed", "world_events"
         ],
         "names": [
             "Chests Found", "Items Identified", "Total Logins", "Total Deaths", "Blocks Walked", "Playtime",
-            "First Join Date", "Combat Level", "Mobs Killed"
+            "First Join Date", "Combat Level", "Mobs Killed", "World Events"
         ]
     }
 }
 
 class Leaderboard(commands.GroupCog, name="leaderboard"):
-    """
-    Group cog for all leaderboard related commands.
-    """
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
