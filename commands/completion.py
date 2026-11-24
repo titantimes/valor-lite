@@ -5,6 +5,7 @@ from discord.ext import commands
 
 from core.antispam import rate_limit_check
 from util.embeds import ErrorEmbed
+from util.board import CompletionBoardView, buildCompletionBoard
 from util.requests import request
 from util.mappings import MAX_STATS, SUPPORT_RANK_SLOTS
 
@@ -37,7 +38,7 @@ def fixapipls(quest: str) -> bool:
         and parts[2] in ("farming", "fishing", "mining", "woodcutting")
     )
 
-async def show_total_progress(stats: dict, max_characters: int) -> str:
+async def show_total_progress(stats: dict, max_characters: int, rows: list = None) -> str:
     sections = []  
     total = 0  
     total_max = 0 
@@ -47,10 +48,13 @@ async def show_total_progress(stats: dict, max_characters: int) -> str:
     green = "\033[0;32m"
     purple = "\033[0;35m"
     red = "\033[1;31m"
+    colors = {blue: "level", purple: "profession", green: "activity"}
     async def section(label: str, value: int, max_val: int, color_code: str):
         nonlocal total, total_max
         total += value
         total_max += max_val
+        if rows is not None:
+            rows.append((label, value, max_val, colors[color_code]))
         return f"{color_code}{label:>24}{stop}  | {value:7,} / {max_val:6,}  | {await get_colored_percentage(value / max_val)}"
 
     sections.append(await section("Total Level", stats["Level"], MAX_STATS["total"] * max_characters, blue))
@@ -73,6 +77,8 @@ async def show_total_progress(stats: dict, max_characters: int) -> str:
     sections.append(await section("Unique Raids", stats["Unique Raid Completions"], 5 * max_characters, green))
 
     sections.append(f"{red}{'Overall Total':>24}{stop}  | {total:7,} / {total_max:6,}  | {await get_colored_percentage(total / total_max)}")
+    if rows is not None:
+        rows.append(("Overall Total", total, total_max, "overall"))
 
     return "\n".join(sections)
 
@@ -163,10 +169,17 @@ class Completion(commands.Cog):
         except (KeyError, AttributeError, TypeError):
             return await interaction.followup.send(embed=ErrorEmbed("Hidden player profile."))
 
-        body = await show_total_progress(totals, max_chars)
+        rows = []
+        body = await show_total_progress(totals, max_chars, rows)
         bold = "\033[1m"
         stop = "\033[0m"
-        await interaction.followup.send(f"```ansi\n{bold}{username}'s Completionism{stop}\n{body}\n```")
+        text = f"```ansi\n{bold}{username}'s Completionism{stop}\n{body}\n```"
+        view = CompletionBoardView(interaction.user.id, username, data.get("uuid"), rows, text)
+        if view.isfancy:
+            board = await buildCompletionBoard(username, data.get("uuid"), rows)
+            await interaction.followup.send(file=board, view=view)
+        else:
+            await interaction.followup.send(content=text, view=view)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Completion(bot))

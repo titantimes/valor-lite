@@ -733,3 +733,67 @@ class HistoryBoardView(discord.ui.View):
                 show_rank=False,
             )
             await interaction.edit_original_response(content=table, embed=None, view=self, attachments=[])
+
+async def buildCompletionBoard(username: str, uuid: str, rows: list[tuple[str, int, int, str]]) -> discord.File:
+    width = 820
+    header = 78
+    spacing = 37
+    height = header + 14 + len(rows) * spacing + 10
+    board = Image.new("RGBA", (width, height), (32, 34, 38))
+    draw = ImageDraw.Draw(board)
+    font = ImageFont.truetype(_resolve_font_path(), 17)
+    small = ImageFont.truetype(_resolve_font_path(), 14)
+    title = ImageFont.truetype(_resolve_font_path(), 24)
+
+    draw.rounded_rectangle((8, 8, width - 8, header), radius=8, fill=(42, 45, 52), outline=(58, 62, 72))
+    avatar = (await get_player_avatar(username, uuid)).resize((54, 54))
+    board.paste(avatar, (18, 16), avatar.getchannel("A"))
+    draw.text((84, 19), username, font=title, fill=(255, 255, 255))
+    draw.text((86, 49), "Completionism", font=small, fill=(160, 168, 185))
+
+    colors = {
+        "level": (100, 160, 255),
+        "profession": (200, 145, 245),
+        "activity": (115, 220, 145),
+        "overall": (255, 115, 115),
+    }
+    for index, (label, value, maximum, category) in enumerate(rows):
+        y = header + 8 + index * spacing
+        background = (45, 48, 56) if index % 2 == 0 else (39, 42, 49)
+        draw.rounded_rectangle((8, y, width - 8, y + spacing - 3), radius=4, fill=background)
+        percent = min(value / maximum, 1)
+        color = ((85, 220, 230) if percent >= 0.96 else
+                 (235, 95, 95) if percent < 0.3 else
+                 (235, 195, 90) if percent < 0.8 else (105, 220, 135))
+        draw.text((20, y + 8), label, font=font, fill=colors[category])
+        draw.text((510, y + 8), f"{value:,} / {maximum:,}", font=font, fill=(235, 235, 240), anchor="ra")
+        draw.text((610, y + 8), f"{percent:.2%}", font=font, fill=color, anchor="ra")
+        draw.rounded_rectangle((630, y + 11, 790, y + 23), radius=5, fill=(65, 69, 78))
+        progress = max(0, min(160, round(percent * 160)))
+        if progress:
+            draw.rounded_rectangle((630, y + 11, 630 + progress, y + 23), radius=5, fill=color)
+
+    image = io.BytesIO()
+    board.save(image, "PNG")
+    image.seek(0)
+    return discord.File(fp=image, filename="completion_board.png")
+
+
+class CompletionBoardView(discord.ui.View):
+    def __init__(self, userid: int, username: str, uuid: str, rows: list[tuple[str, int, int, str]], text: str):
+        super().__init__(timeout=120)
+        self.username = username
+        self.uuid = uuid
+        self.rows = rows
+        self.text = text
+        self.isfancy = SettingsManager("user", userid).get("preferred_leaderboard_output_type") == "image"
+
+    @discord.ui.button(emoji=UI_EMOJI_MAP.get("newspaper", "📰"), row=1)
+    async def toggleTableView(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.isfancy = not self.isfancy
+        await interaction.response.defer()
+        if self.isfancy:
+            board = await buildCompletionBoard(self.username, self.uuid, self.rows)
+            await interaction.edit_original_response(content=None, embed=None, view=self, attachments=[board])
+        else:
+            await interaction.edit_original_response(content=self.text, embed=None, view=self, attachments=[])
