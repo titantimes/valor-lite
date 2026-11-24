@@ -238,6 +238,13 @@ class TerritoryTrackerService(commands.Cog):
                 except Exception:
                     logging.exception(f"Territory Tracker: failed to post change for {territory.get('territory')}")
 
+            subscriptions = self.bot.get_cog("TerritorySubscriptions")
+            if subscriptions:
+                try:
+                    await subscriptions.publishChanges(changed_territories, self.territory_data)
+                except Exception:
+                    logging.exception("Territory tracks: failed to queue transfers")
+
         self.territory_data = updated_data
 
 
